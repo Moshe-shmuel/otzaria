@@ -32,6 +32,7 @@ class TextSectionEditorDialog extends StatefulWidget {
   final bool hasDraft;
   final EditorSettings settings;
   final String? category;
+  final String? fileType;
 
   const TextSectionEditorDialog({
     super.key,
@@ -43,6 +44,7 @@ class TextSectionEditorDialog extends StatefulWidget {
     required this.hasDraft,
     required this.settings,
     this.category,
+    this.fileType,
   });
 
   @override
