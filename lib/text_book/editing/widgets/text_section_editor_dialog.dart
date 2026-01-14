@@ -73,6 +73,7 @@ class _TextSectionEditorDialogState extends State<TextSectionEditorDialog> {
   late ScrollController _editorScrollController;
   late ScrollController _previewScrollController;
   bool _isSyncingScroll = false;
+  Timer? _scrollSyncTimer; // טיימר לביטול סנכרון גלילה
 
   // Flag to prevent duplicate undo snapshots when programmatic changes trigger _onTextChanged
   bool _isApplyingProgrammaticChange = false;
@@ -122,7 +123,8 @@ class _TextSectionEditorDialogState extends State<TextSectionEditorDialog> {
   void dispose() {
     _textController.dispose();
     _debounceTimer?.cancel();
-    _mapDebounceTimer?.cancel(); // בטל גם את debounce המפה
+    _mapDebounceTimer?.cancel();
+    _scrollSyncTimer?.cancel(); // בטל טיימר סנכרון גלילה
     _renderIsolate?.kill();
     _receivePort?.close();
     _editorFocusNode.dispose();
@@ -132,11 +134,14 @@ class _TextSectionEditorDialogState extends State<TextSectionEditorDialog> {
   }
 
   void _syncScrollFromEditor() {
-    if (_isSyncingScroll) return;
+    if (_isSyncingScroll || !mounted) return;
+    
+    // בדוק שה-controllers מוכנים
+    if (!_editorScrollController.hasClients || !_previewScrollController.hasClients) {
+      return;
+    }
 
-    setState(() {
-      _isSyncingScroll = true;
-    });
+    _isSyncingScroll = true;
 
     final editorOffset = _editorScrollController.offset;
     final editorMaxScroll = _editorScrollController.position.maxScrollExtent;
@@ -147,21 +152,24 @@ class _TextSectionEditorDialogState extends State<TextSectionEditorDialog> {
       _previewScrollController.jumpTo(scrollFraction * previewMaxScroll);
     }
 
-    Future.delayed(const Duration(milliseconds: 150), () {
+    // השתמש בטיימר במקום Future.delayed למניעת memory leaks
+    _scrollSyncTimer?.cancel();
+    _scrollSyncTimer = Timer(const Duration(milliseconds: 150), () {
       if (mounted) {
-        setState(() {
-          _isSyncingScroll = false;
-        });
+        _isSyncingScroll = false;
       }
     });
   }
 
   void _syncScrollFromPreview() {
-    if (_isSyncingScroll) return;
+    if (_isSyncingScroll || !mounted) return;
+    
+    // בדוק שה-controllers מוכנים
+    if (!_previewScrollController.hasClients || !_editorScrollController.hasClients) {
+      return;
+    }
 
-    setState(() {
-      _isSyncingScroll = true;
-    });
+    _isSyncingScroll = true;
 
     final previewOffset = _previewScrollController.offset;
     final previewMaxScroll = _previewScrollController.position.maxScrollExtent;
@@ -172,11 +180,11 @@ class _TextSectionEditorDialogState extends State<TextSectionEditorDialog> {
       _editorScrollController.jumpTo(scrollFraction * editorMaxScroll);
     }
 
-    Future.delayed(const Duration(milliseconds: 150), () {
+    // השתמש בטיימר במקום Future.delayed למניעת memory leaks
+    _scrollSyncTimer?.cancel();
+    _scrollSyncTimer = Timer(const Duration(milliseconds: 150), () {
       if (mounted) {
-        setState(() {
-          _isSyncingScroll = false;
-        });
+        _isSyncingScroll = false;
       }
     });
   }
@@ -303,9 +311,6 @@ class _TextSectionEditorDialogState extends State<TextSectionEditorDialog> {
       _previewContent = newText;
     });
   }
-
-  // Track active formatting tags
-  final Set<String> _activeFormats = {};
 
   void _wrapSelection(String prefix, String suffix) {
     final selection = _textController.selection;
@@ -651,29 +656,34 @@ class _TextSectionEditorDialogState extends State<TextSectionEditorDialog> {
     }
 
     if (foundIndex != -1) {
-      // ================== התחלת התיקון ==================
+      // בדוק שה-ScrollController מוכן לפני השימוש
+      if (!_editorScrollController.hasClients) {
+        // אם אין clients, פשוט בחר את הטקסט בלי גלילה
+        _textController.selection = TextSelection(
+          baseOffset: foundIndex,
+          extentOffset: foundIndex + searchText.length,
+        );
+        _editorFocusNode.requestFocus();
+        return;
+      }
 
-      // הערכה של מיקום הגלילה.
-      // 1. חשב את מספר השורות עד לתוצאה.
+      // הערכה של מיקום הגלילה
       final linesUpToFound =
           '\n'.allMatches(currentText.substring(0, foundIndex)).length;
 
-      // 2. הערך את הגובה הממוצע של שורה (למשל, 20 פיקסלים. אפשר לשפר את זה בעתיד).
       const averageLineHeight = 20.0;
       final estimatedScrollOffset = linesUpToFound * averageLineHeight;
 
-      // 3. ודא שהגלילה לא חורגת מהגבולות.
+      // ודא שהגלילה לא חורגת מהגבולות
       final maxScroll = _editorScrollController.position.maxScrollExtent;
       final targetOffset = estimatedScrollOffset.clamp(0.0, maxScroll);
 
       // גלול למיקום המוערך
       _editorScrollController.animateTo(
-        targetOffset, // <-- שימוש במיקום המחושב
+        targetOffset,
         duration: const Duration(milliseconds: 300),
         curve: Curves.easeInOut,
       );
-
-      // =================== סוף התיקון ===================
 
       // Select the found text
       _textController.selection = TextSelection(
@@ -880,40 +890,9 @@ class _TextSectionEditorDialogState extends State<TextSectionEditorDialog> {
                       padding: const EdgeInsets.all(
                           16), // הוספת padding גם כאן ליישור
                       child: SelectionArea(
-                        onSelectionChanged: (SelectedContent? selectedContent) {
-                          if (selectedContent != null && selectedContent.plainText.isNotEmpty) {
-                            // קבל את ה-TextSelection מתוך SelectedContent
-                            final selection = TextSelection(
-                              baseOffset: 0,
-                              extentOffset: selectedContent.plainText.length,
-                            );
-                            
-                            // בדוק שה-selection לא חורג מגדולת ה-plaintext
-                            if (selection.start < 0 || selection.end > _plainTextContent.length) {
-                              return; // בטל בחירה לא תקנית
-                            }
-                            
-                            // המר מ-plaintext selection ל-original text עם tags
-                            // (הפונקציה תבנה מפה מיד אם היא יצאה מעדכן)
-                            final originalStart = _convertPlainTextIndexToOriginalIndex(selection.start);
-                            final originalEnd = _convertPlainTextIndexToOriginalIndex(selection.end);
-                            
-                            // בדוק שהתוצאה תקנית
-                            if (originalStart > originalEnd) {
-                              return; // בטל בחירה חוקית
-                            }
-                            
-                            _textController.selection = TextSelection(
-                              baseOffset: originalStart,
-                              extentOffset: originalEnd,
-                            );
-                            
-                            // בקש focus על העורך
-                            Future.delayed(const Duration(milliseconds: 50), () {
-                              _editorFocusNode.requestFocus();
-                            });
-                          }
-                        },
+                        // הסר את onSelectionChanged כי הוא לא עובד נכון עם SelectedContent
+                        // במקום זה, המשתמש יכול לבחור טקסט בתצוגה המקדימה אבל זה לא יסנכרן עם העורך
+                        // זה פתרון זמני עד שנמצא דרך נכונה לטפל ב-SelectedContent
                         child: _previewRenderer.renderPreview(
                           markdown: _previewContent,
                           textStyle: const TextStyle(
