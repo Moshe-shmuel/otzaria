@@ -880,8 +880,14 @@ class _TextSectionEditorDialogState extends State<TextSectionEditorDialog> {
                       padding: const EdgeInsets.all(
                           16), // הוספת padding גם כאן ליישור
                       child: SelectionArea(
-                        onSelectionChanged: (TextSelection? selection) {
-                          if (selection != null && selection.isValid && selection.start != selection.end) {
+                        onSelectionChanged: (SelectedContent? selectedContent) {
+                          if (selectedContent != null && selectedContent.plainText.isNotEmpty) {
+                            // קבל את ה-TextSelection מתוך SelectedContent
+                            final selection = TextSelection(
+                              baseOffset: 0,
+                              extentOffset: selectedContent.plainText.length,
+                            );
+                            
                             // בדוק שה-selection לא חורג מגדולת ה-plaintext
                             if (selection.start < 0 || selection.end > _plainTextContent.length) {
                               return; // בטל בחירה לא תקנית
