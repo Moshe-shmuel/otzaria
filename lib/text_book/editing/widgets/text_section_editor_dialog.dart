@@ -890,32 +890,35 @@ class _TextSectionEditorDialogState extends State<TextSectionEditorDialog> {
                       padding: const EdgeInsets.all(
                           16), // הוספת padding גם כאן ליישור
                       child: SelectionArea(
-                        onSelectionChanged: (SelectedContent? selectedContent) {
-                          if (selectedContent != null && selectedContent.plainText.isNotEmpty) {
-                            // נסה למצוא את הטקסט הנבחר בתוכן המקורי
-                            final selectedText = selectedContent.plainText;
-                            final originalText = _textController.text;
-                            
-                            // חפש את הטקסט הנבחר בתוכן המקורי (ללא HTML tags)
-                            final plainText = _stripHtmlTags(originalText);
-                            final selectedIndex = plainText.indexOf(selectedText);
-                            
-                            if (selectedIndex != -1) {
-                              // המר את המיקום מ-plaintext ל-original text
-                              final originalStart = _convertPlainTextIndexToOriginalIndex(selectedIndex);
-                              final originalEnd = _convertPlainTextIndexToOriginalIndex(selectedIndex + selectedText.length);
+                        onSelectionChanged: (TextSelection? selection) {
+                          if (selection != null && selection.isValid && selection.start != selection.end) {
+                            // קבל את הטקסט הנבחר מהתצוגה המקדימה
+                            final previewText = _stripHtmlTags(_previewContent);
+                            if (selection.end <= previewText.length) {
+                              final selectedText = previewText.substring(selection.start, selection.end);
                               
-                              // בדוק שהתוצאה תקנית
-                              if (originalStart >= 0 && originalEnd <= originalText.length && originalStart <= originalEnd) {
-                                _textController.selection = TextSelection(
-                                  baseOffset: originalStart,
-                                  extentOffset: originalEnd,
-                                );
+                              // חפש את הטקסט הנבחר בתוכן המקורי
+                              final originalText = _textController.text;
+                              final plainText = _stripHtmlTags(originalText);
+                              final selectedIndex = plainText.indexOf(selectedText);
+                              
+                              if (selectedIndex != -1) {
+                                // המר את המיקום מ-plaintext ל-original text
+                                final originalStart = _convertPlainTextIndexToOriginalIndex(selectedIndex);
+                                final originalEnd = _convertPlainTextIndexToOriginalIndex(selectedIndex + selectedText.length);
                                 
-                                // בקש focus על העורך
-                                Future.delayed(const Duration(milliseconds: 50), () {
-                                  _editorFocusNode.requestFocus();
-                                });
+                                // בדוק שהתוצאה תקנית
+                                if (originalStart >= 0 && originalEnd <= originalText.length && originalStart <= originalEnd) {
+                                  _textController.selection = TextSelection(
+                                    baseOffset: originalStart,
+                                    extentOffset: originalEnd,
+                                  );
+                                  
+                                  // בקש focus על העורך
+                                  Future.delayed(const Duration(milliseconds: 50), () {
+                                    _editorFocusNode.requestFocus();
+                                  });
+                                }
                               }
                             }
                           }
