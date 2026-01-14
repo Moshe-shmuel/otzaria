@@ -59,6 +59,8 @@ class _TextSectionEditorDialogState extends State<TextSectionEditorDialog> {
 
   bool _hasUnsavedChanges = false;
   String _previewContent = '';
+  String _plainTextContent = ''; // גרסה בלי HTML tags לתאום עם Preview
+  List<int> _plainToOriginalMap = []; // מפה לקבלת עמדות בO(1) במקום O(n)
   final FocusNode _editorFocusNode = FocusNode();
   String? _lastSearchText; // לשמירת טקסט החיפוש האחרון עבור F3
 
@@ -72,6 +74,9 @@ class _TextSectionEditorDialogState extends State<TextSectionEditorDialog> {
   late ScrollController _previewScrollController;
   bool _isSyncingScroll = false;
 
+  // Flag to prevent duplicate undo snapshots when programmatic changes trigger _onTextChanged
+  bool _isApplyingProgrammaticChange = false;
+
   // Background rendering state
   bool _isRenderingInBackground = false;
   Isolate? _renderIsolate;
@@ -79,6 +84,7 @@ class _TextSectionEditorDialogState extends State<TextSectionEditorDialog> {
 
   // Performance optimizations
   String _lastRenderedContent = '';
+  Timer? _mapDebounceTimer; // debounce לבנייה של _plainToOriginalMap
 
   // Static variable to track if notification was shown this session
   static bool _hasShownNotification = false;
@@ -90,6 +96,8 @@ class _TextSectionEditorDialogState extends State<TextSectionEditorDialog> {
     _textController = TextEditingController(text: widget.initialContent);
     _previewRenderer = PreviewRenderer();
     _previewContent = widget.initialContent;
+    _plainTextContent = _stripHtmlTags(widget.initialContent);
+    _buildPlainTextMap(widget.initialContent); // בנה את המפה בתחילה
 
     _editorScrollController = ScrollController();
     _previewScrollController = ScrollController();
@@ -114,6 +122,7 @@ class _TextSectionEditorDialogState extends State<TextSectionEditorDialog> {
   void dispose() {
     _textController.dispose();
     _debounceTimer?.cancel();
+    _mapDebounceTimer?.cancel(); // בטל גם את debounce המפה
     _renderIsolate?.kill();
     _receivePort?.close();
     _editorFocusNode.dispose();
@@ -189,6 +198,9 @@ class _TextSectionEditorDialogState extends State<TextSectionEditorDialog> {
       setState(() {
         _previewContent = content;
         _lastRenderedContent = content;
+        // עדכן גם את plaintext והמפה בעדכון preview
+        _plainTextContent = _stripHtmlTags(content);
+        _buildPlainTextMap(content);
         _isRenderingInBackground = false;
       });
     }
@@ -267,16 +279,29 @@ class _TextSectionEditorDialogState extends State<TextSectionEditorDialog> {
       return;
     }
 
+    // Save undo snapshot before making changes
+    if (!_isUndoRedoOperation) {
+      _saveToUndoStack(currentText, selection);
+    }
+
     final newText = currentText.replaceRange(
       selection.start,
       selection.end,
       text,
     );
 
+    _isApplyingProgrammaticChange = true;
     _textController.text = newText;
     _textController.selection = TextSelection.collapsed(
       offset: selection.start + text.length,
     );
+    _isApplyingProgrammaticChange = false;
+    
+    // Mark as changed and sync preview (like _wrapSelection does)
+    setState(() {
+      _hasUnsavedChanges = true;
+      _previewContent = newText;
+    });
   }
 
   // Track active formatting tags
@@ -287,52 +312,28 @@ class _TextSectionEditorDialogState extends State<TextSectionEditorDialog> {
     final currentText = _textController.text;
     final selectedText = selection.textInside(currentText);
 
+    // Don't allow formatting empty selection
+    if (selectedText.isEmpty) {
+      UiSnack.show('בחר טקסט כדי להחיל עיצוב');
+      return;
+    }
+
+    // Save current state to undo stack before making programmatic changes
+    if (!_isUndoRedoOperation) {
+      _saveToUndoStack(currentText, selection);
+    }
+
     // Check if immediately wrapped with tags (tags right before and after selection)
     final hasImmediatePrefix = selection.start >= prefix.length && 
         currentText.substring(selection.start - prefix.length, selection.start) == prefix;
     final hasImmediateSuffix = selection.end + suffix.length <= currentText.length &&
         currentText.substring(selection.end, selection.end + suffix.length) == suffix;
 
-    // Check if selection is inside a wrapped block (for partial selections like selecting "hello" in "<b>hello world</b>")
-    bool isInsideWrappedBlock = false;
-    int blockStartIndex = -1;
-    int blockEndIndex = -1;
-
-    if (!hasImmediatePrefix && !hasImmediateSuffix) {
-      // Look backwards for opening tag
-      for (int i = selection.start - 1; i >= 0; i--) {
-        if (i + prefix.length <= currentText.length &&
-            currentText.substring(i, i + prefix.length) == prefix) {
-          // Check if this opening tag is still valid (not closed before selection)
-          String textBetween = currentText.substring(i + prefix.length, selection.start);
-          if (!textBetween.contains(suffix)) {
-            blockStartIndex = i;
-            break;
-          }
-        }
-      }
-
-      // Look forwards for closing tag if we found an opening tag
-      if (blockStartIndex != -1) {
-        for (int i = selection.end; i + suffix.length <= currentText.length; i++) {
-          if (currentText.substring(i, i + suffix.length) == suffix) {
-            // Check if this closing tag matches (no new opening between selection and this closing)
-            String textBetween = currentText.substring(selection.end, i);
-            if (!textBetween.contains(prefix)) {
-              blockEndIndex = i;
-              isInsideWrappedBlock = true;
-              break;
-            }
-          }
-        }
-      }
-    }
-
     String newText;
     TextSelection newSelection;
 
     if (hasImmediatePrefix && hasImmediateSuffix) {
-      // Remove formatting - tags are immediately adjacent to selection
+      // Case 1: Remove formatting - tags are immediately adjacent to selection
       final start = selection.start - prefix.length;
       final end = selection.end + suffix.length;
       newText = currentText.replaceRange(start, end, selectedText);
@@ -341,35 +342,9 @@ class _TextSectionEditorDialogState extends State<TextSectionEditorDialog> {
         baseOffset: start,
         extentOffset: start + selectedText.length,
       );
-    } else if (isInsideWrappedBlock) {
-      // Add closing tag at start of selection and opening tag at end
-      // This removes formatting from the selected portion only
-      newText = currentText;
-      
-      // Insert closing tag at start of selection
-      newText = newText.replaceRange(selection.start, selection.start, suffix);
-      
-      // Insert opening tag at end of selection (accounting for inserted suffix)
-      newText = newText.replaceRange(selection.end + suffix.length, selection.end + suffix.length, prefix);
-      
-      // Check if empty tags were created (e.g., <b></b>) and remove them
-      final emptyTag = suffix + prefix;
-      if (newText.contains(emptyTag)) {
-        newText = newText.replaceAll(emptyTag, '');
-        // After removing empty tags, selection stays on original text
-        newSelection = TextSelection(
-          baseOffset: selection.start,
-          extentOffset: selection.end,
-        );
-      } else {
-        // Empty tags weren't created, keep selection adjusted for new tags
-        newSelection = TextSelection(
-          baseOffset: selection.start + suffix.length,
-          extentOffset: selection.end + suffix.length,
-        );
-      }
-    } else {
-      // Apply the formatting
+    } else if (hasImmediatePrefix || hasImmediateSuffix) {
+      // Case 2: Only one side has tags - this is likely an incomplete wrapping, just apply formatting
+      // Don't try to unwrap, just add the formatting
       newText = currentText.replaceRange(
         selection.start,
         selection.end,
@@ -380,10 +355,108 @@ class _TextSectionEditorDialogState extends State<TextSectionEditorDialog> {
         baseOffset: selection.start + prefix.length,
         extentOffset: selection.start + prefix.length + selectedText.length,
       );
+    } else {
+      // Case 3: Check if selection is inside a wrapped block
+      bool isInsideWrappedBlock = false;
+      int blockStartIndex = -1;
+      int blockEndIndex = -1;
+
+      // Look backwards for opening tag (starting from closest to selection start)
+      for (int i = selection.start - 1; i >= 0; i--) {
+        if (i + prefix.length <= currentText.length &&
+            currentText.substring(i, i + prefix.length) == prefix) {
+          // Verify this opening tag is not closed before selection
+          // Count all suffix occurrences between tag and selection
+          String textBetween = currentText.substring(i + prefix.length, selection.start);
+          int suffixCount = 0;
+          int idx = 0;
+          while ((idx = textBetween.indexOf(suffix, idx)) != -1) {
+            suffixCount++;
+            idx += suffix.length;
+          }
+          // If odd number of suffixes, this tag is closed before selection
+          if (suffixCount % 2 == 0) {
+            blockStartIndex = i;
+            break;
+          }
+        }
+      }
+
+      // Look forwards for closing tag if we found an opening tag
+      if (blockStartIndex != -1) {
+        for (int i = selection.end; i + suffix.length <= currentText.length; i++) {
+          if (currentText.substring(i, i + suffix.length) == suffix) {
+            // Verify this closing tag matches (count prefix between selection and this closing)
+            String textBetween = currentText.substring(selection.end, i);
+            int prefixCount = 0;
+            int idx = 0;
+            while ((idx = textBetween.indexOf(prefix, idx)) != -1) {
+              prefixCount++;
+              idx += prefix.length;
+            }
+            // If even number of prefixes, this closing tag matches our opening tag
+            if (prefixCount % 2 == 0) {
+              blockEndIndex = i;
+              isInsideWrappedBlock = true;
+              break;
+            }
+          }
+        }
+      }
+
+      if (isInsideWrappedBlock) {
+        // Case 4: Add closing tag at start and opening tag at end (partial unwrap)
+        newText = currentText;
+        
+        // Insert closing tag at start of selection
+        newText = newText.replaceRange(selection.start, selection.start, suffix);
+        
+        // Insert opening tag at end of selection (accounting for inserted suffix)
+        newText = newText.replaceRange(selection.end + suffix.length, selection.end + suffix.length, prefix);
+        
+        // Check if empty tags were created at the insertion point
+        final emptyTag = suffix + prefix;
+        final emptyTagIndex = newText.indexOf(emptyTag, selection.start);
+        
+        if (emptyTagIndex != -1 && emptyTagIndex == selection.start) {
+          // The empty tag is right where we inserted it, remove it
+          newText = newText.replaceRange(emptyTagIndex, emptyTagIndex + emptyTag.length, '');
+          newSelection = TextSelection(
+            baseOffset: selection.start,
+            extentOffset: selection.end,
+          );
+        } else {
+          // Empty tags weren't created, keep adjusted selection
+          newSelection = TextSelection(
+            baseOffset: selection.start + suffix.length,
+            extentOffset: selection.end + suffix.length,
+          );
+        }
+      } else {
+        // Case 5: Apply new formatting
+        newText = currentText.replaceRange(
+          selection.start,
+          selection.end,
+          '$prefix$selectedText$suffix',
+        );
+
+        newSelection = TextSelection(
+          baseOffset: selection.start + prefix.length,
+          extentOffset: selection.start + prefix.length + selectedText.length,
+        );
+      }
     }
 
+    _isApplyingProgrammaticChange = true;
     _textController.text = newText;
     _textController.selection = newSelection;
+    _isApplyingProgrammaticChange = false;
+    
+    // mark as changed and update preview
+    setState(() {
+      _hasUnsavedChanges = true;
+      _previewContent = newText;
+    });
   }
 
   bool _handleKeyEvent(KeyEvent event) {
@@ -444,6 +517,11 @@ class _TextSectionEditorDialogState extends State<TextSectionEditorDialog> {
   void _saveToUndoStack(String text, TextSelection selection) {
     if (_isUndoRedoOperation) return;
 
+    // Don't save duplicate consecutive snapshots (skip if text hasn't changed)
+    if (_undoStack.isNotEmpty && _undoStack.last == text) {
+      return;
+    }
+
     // Remove any redo states if we're adding a new change
     if (_undoIndex < _undoStack.length - 1) {
       _undoStack.removeRange(_undoIndex + 1, _undoStack.length);
@@ -469,18 +547,41 @@ class _TextSectionEditorDialogState extends State<TextSectionEditorDialog> {
       _isUndoRedoOperation = true;
       _textController.text = _undoStack[_undoIndex];
       _textController.selection = _undoSelectionStack[_undoIndex];
-      _previewContent = _undoStack[_undoIndex];
+      
+      // Cancel any pending debounced preview update to avoid stale content
+      _debounceTimer?.cancel();
+      
+      // Update UI state to reflect undo
+      setState(() {
+        _previewContent = _undoStack[_undoIndex];
+        _plainTextContent = _stripHtmlTags(_undoStack[_undoIndex]);
+        _buildPlainTextMap(_undoStack[_undoIndex]); // בנה מפה חדשה אחרי undo
+        _lastRenderedContent = _undoStack[_undoIndex];
+        _hasUnsavedChanges = _undoStack[_undoIndex] != widget.initialContent;
+      });
+      
       _isUndoRedoOperation = false;
     }
   }
 
   void _onTextChanged() {
-    if (!_isUndoRedoOperation) {
+    // Skip undo snapshot if this change came from _wrapSelection or _insertText (they already saved snapshot)
+    if (!_isUndoRedoOperation && !_isApplyingProgrammaticChange) {
       _saveToUndoStack(_textController.text, _textController.selection);
     }
 
     setState(() {
       _hasUnsavedChanges = _textController.text != widget.initialContent;
+      // עדכן _plainTextContent מיד כדי לשמור סנכרון
+      _plainTextContent = _stripHtmlTags(_textController.text);
+    });
+
+    // Debounce בנייה של המפה - לא בונים אותה בכל keystroke
+    _mapDebounceTimer?.cancel();
+    _mapDebounceTimer = Timer(const Duration(milliseconds: 100), () {
+      if (mounted) {
+        _buildPlainTextMap(_textController.text);
+      }
     });
 
     // Debounce preview updates and render in background
@@ -586,6 +687,56 @@ class _TextSectionEditorDialogState extends State<TextSectionEditorDialog> {
       // Show not found message
       UiSnack.show('הטקסט לא נמצא');
     }
+  }
+
+  /// הסר את כל HTML tags מטקסט
+  String _stripHtmlTags(String text) {
+    return text.replaceAll(RegExp(r'<[^>]*>'), '');
+  }
+
+  /// בנה מפה של plaintext index → original index לביצועים O(1)
+  void _buildPlainTextMap(String originalText) {
+    _plainToOriginalMap.clear();
+    int originalIndex = 0;
+    
+    while (originalIndex < originalText.length) {
+      // דלג על tags - חפש < ואז >
+      if (originalText[originalIndex] == '<') {
+        // מצא את סוף ה-tag
+        int tagEnd = originalText.indexOf('>', originalIndex);
+        if (tagEnd != -1) {
+          originalIndex = tagEnd + 1;
+        } else {
+          // אם אין > - זה tag לא תקני, דלג רק על <
+          originalIndex++;
+        }
+      } else {
+        // זה טקסט רגיל - הוסף את המיפוי הזה
+        _plainToOriginalMap.add(originalIndex);
+        originalIndex++;
+      }
+    }
+    
+    // הוסף עמדה סופית לסוף הטקסט
+    _plainToOriginalMap.add(originalIndex);
+  }
+
+  /// המר עמדות selection מ-plaintext ל-original text בעזרת המפה - O(1)
+  int _convertPlainTextIndexToOriginalIndex(int plainIndex) {
+    // בדוק אם המפה יצאה מעדכן - אם כן, בנה אותה מיד
+    if (_plainToOriginalMap.isEmpty || _lastRenderedContent != _textController.text) {
+      _buildPlainTextMap(_textController.text);
+    }
+    
+    // בדוק גבולות
+    if (plainIndex < 0) return 0;
+    if (plainIndex >= _plainToOriginalMap.length) {
+      return _plainToOriginalMap.isNotEmpty 
+        ? _plainToOriginalMap.last 
+        : _previewContent.length;
+    }
+    
+    return _plainToOriginalMap[plainIndex];
   }
 
   @override
@@ -715,20 +866,50 @@ class _TextSectionEditorDialogState extends State<TextSectionEditorDialog> {
                       ),
                     ),
                   ),
-                  // חלונית התצוגה המקדימה (שמאל)
+                  // חלונית התצוגה המקדימה (שמאל) - selectable כדי לערוך דרכה
                   Expanded(
                     flex: 1,
                     child: SingleChildScrollView(
                       controller: _previewScrollController,
                       padding: const EdgeInsets.all(
                           16), // הוספת padding גם כאן ליישור
-                      child: _previewRenderer.renderPreview(
-                        markdown: _previewContent,
-                        textStyle: const TextStyle(
-                          fontSize: 16,
+                      child: SelectionArea(
+                        onSelectionChanged: (TextSelection? selection) {
+                          if (selection != null && selection.hasLength) {
+                            // בדוק שה-selection לא חורג מגדולת ה-plaintext
+                            if (selection.start < 0 || selection.end > _plainTextContent.length) {
+                              return; // בטל בחירה לא תקנית
+                            }
+                            
+                            // המר מ-plaintext selection ל-original text עם tags
+                            // (הפונקציה תבנה מפה מיד אם היא יצאה מעדכן)
+                            final originalStart = _convertPlainTextIndexToOriginalIndex(selection.start);
+                            final originalEnd = _convertPlainTextIndexToOriginalIndex(selection.end);
+                            
+                            // בדוק שהתוצאה תקנית
+                            if (originalStart > originalEnd) {
+                              return; // בטל בחירה חוקית
+                            }
+                            
+                            _textController.selection = TextSelection(
+                              baseOffset: originalStart,
+                              extentOffset: originalEnd,
+                            );
+                            
+                            // בקש focus על העורך
+                            Future.delayed(const Duration(milliseconds: 50), () {
+                              _editorFocusNode.requestFocus();
+                            });
+                          }
+                        },
+                        child: _previewRenderer.renderPreview(
+                          markdown: _previewContent,
+                          textStyle: const TextStyle(
+                            fontSize: 16,
+                            fontFamily: 'TaameyAshkenaz',
+                          ),
                           fontFamily: 'TaameyAshkenaz',
                         ),
-                        fontFamily: 'TaameyAshkenaz',
                       ),
                     ),
                   ),
