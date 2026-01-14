@@ -15,6 +15,7 @@ import 'package:otzaria/data/data_providers/file_system_data_provider.dart';
 import 'package:otzaria/core/scaffold_messenger.dart';
 import 'package:otzaria/widgets/confirmation_dialog.dart';
 import 'markdown_toolbar.dart';
+import 'editor_headers_bar.dart';
 
 // מצבי תצוגה
 enum ViewMode {
@@ -783,6 +784,35 @@ class _TextSectionEditorDialogState extends State<TextSectionEditorDialog> {
     });
   }
 
+  /// ניווט לכותרת לפי מיקום בטקסט
+  void _navigateToHeader(int position) {
+    if (!_editorScrollController.hasClients) return;
+
+    // הערכה של מיקום הגלילה
+    final textUpToPosition = _textController.text.substring(0, position);
+    final linesUpToPosition = '\n'.allMatches(textUpToPosition).length;
+
+    const averageLineHeight = 20.0;
+    final estimatedScrollOffset = linesUpToPosition * averageLineHeight;
+
+    // ודא שהגלילה לא חורגת מהגבולות
+    final maxScroll = _editorScrollController.position.maxScrollExtent;
+    final targetOffset = estimatedScrollOffset.clamp(0.0, maxScroll);
+
+    // גלול למיקום המוערך
+    _editorScrollController.animateTo(
+      targetOffset,
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeInOut,
+    );
+
+    // הצב את הסמן במיקום הכותרת
+    _textController.selection = TextSelection.collapsed(offset: position);
+    
+    // בקש פוקוס על העורך
+    _editorFocusNode.requestFocus();
+  }
+
   /// קבל את הטקסט לתצוגה לפי המצב הנוכחי
   String _getViewModeTitle() {
     switch (_currentViewMode) {
@@ -842,6 +872,24 @@ class _TextSectionEditorDialogState extends State<TextSectionEditorDialog> {
             // שורת הכותרות העליונה
             Row(
               children: [
+                // עמודת הכותרות
+                Container(
+                  width: 200,
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.surfaceContainerHighest,
+                    border: Border(
+                      bottom: BorderSide(color: theme.dividerColor),
+                      right: BorderSide(color: theme.dividerColor),
+                    ),
+                  ),
+                  child: const Text(
+                    'כותרות',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+                // עמודת העריכה
                 Expanded(
                   child: Container(
                     padding: const EdgeInsets.all(8),
@@ -873,6 +921,7 @@ class _TextSectionEditorDialogState extends State<TextSectionEditorDialog> {
                     tooltip: _getViewModeTitle(),
                   ),
                 ),
+                // עמודת התצוגה
                 Expanded(
                   child: Container(
                     padding: const EdgeInsets.all(8),
@@ -931,97 +980,161 @@ class _TextSectionEditorDialogState extends State<TextSectionEditorDialog> {
     }
   }
 
-  /// מצב תצוגה מעוצבת - רק תצוגה מקדימה
+  /// מצב תצוגה מעוצבת - כותרות + תצוגה מקדימה
   Widget _buildFormattedView(ThemeData theme) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      child: SingleChildScrollView(
-        controller: _previewScrollController,
-        child: SelectionArea(
-          onSelectionChanged: (SelectedContent? selectedContent) {
-            if (selectedContent != null && selectedContent.plainText.isNotEmpty) {
-              // קבל את הטקסט הנבחר מהתצוגה המקדימה
-              final selectedText = selectedContent.plainText;
-              
-              // חפש את הטקסט הנבחר בתוכן המקורי
-              final originalText = _textController.text;
-              final plainText = _stripHtmlTags(originalText);
-              final selectedIndex = plainText.indexOf(selectedText);
-              
-              if (selectedIndex != -1) {
-                // המר את המיקום מ-plaintext ל-original text
-                final originalStart = _convertPlainTextIndexToOriginalIndex(selectedIndex);
-                final originalEnd = _convertPlainTextIndexToOriginalIndex(selectedIndex + selectedText.length);
+    return Row(
+      children: [
+        // סרגל הכותרות
+        Container(
+          width: 200,
+          decoration: BoxDecoration(
+            border: Border(right: BorderSide(color: theme.dividerColor)),
+          ),
+          child: EditorHeadersBar(
+            content: _textController.text,
+            editorScrollController: _previewScrollController,
+            textController: _textController,
+            onHeaderTap: (position) {
+              // בתצוגה מעוצבת, נגלול את התצוגה המקדימה
+              if (_previewScrollController.hasClients) {
+                final textUpToPosition = _textController.text.substring(0, position);
+                final linesUpToPosition = '\n'.allMatches(textUpToPosition).length;
+                const averageLineHeight = 20.0;
+                final estimatedScrollOffset = linesUpToPosition * averageLineHeight;
+                final maxScroll = _previewScrollController.position.maxScrollExtent;
+                final targetOffset = estimatedScrollOffset.clamp(0.0, maxScroll);
                 
-                // בדוק שהתוצאה תקנית
-                if (originalStart >= 0 && originalEnd <= originalText.length && originalStart <= originalEnd) {
-                  // עדכן את הבחירה בעורך הטקסט בלי לקחת פוקוס
-                  _textController.selection = TextSelection(
-                    baseOffset: originalStart,
-                    extentOffset: originalEnd,
-                  );
-                  
-                  // אל תקח פוקוס - תן למשתמש להמשיך לבחור בתצוגה המקדימה
-                  // Future.delayed(const Duration(milliseconds: 50), () {
-                  //   _editorFocusNode.requestFocus();
-                  // });
-                }
+                _previewScrollController.animateTo(
+                  targetOffset,
+                  duration: const Duration(milliseconds: 300),
+                  curve: Curves.easeInOut,
+                );
               }
-            }
-          },
-          child: _previewRenderer.renderPreview(
-            markdown: _previewContent,
-            textStyle: const TextStyle(
-              fontSize: 16,
-              fontFamily: 'TaameyAshkenaz',
-            ),
-            fontFamily: 'TaameyAshkenaz',
+            },
           ),
         ),
-      ),
+        // תצוגה מקדימה
+        Expanded(
+          child: Container(
+            padding: const EdgeInsets.all(16),
+            child: SingleChildScrollView(
+              controller: _previewScrollController,
+              child: SelectionArea(
+                onSelectionChanged: (SelectedContent? selectedContent) {
+                  if (selectedContent != null && selectedContent.plainText.isNotEmpty) {
+                    // קבל את הטקסט הנבחר מהתצוגה המקדימה
+                    final selectedText = selectedContent.plainText;
+                    
+                    // חפש את הטקסט הנבחר בתוכן המקורי
+                    final originalText = _textController.text;
+                    final plainText = _stripHtmlTags(originalText);
+                    final selectedIndex = plainText.indexOf(selectedText);
+                    
+                    if (selectedIndex != -1) {
+                      // המר את המיקום מ-plaintext ל-original text
+                      final originalStart = _convertPlainTextIndexToOriginalIndex(selectedIndex);
+                      final originalEnd = _convertPlainTextIndexToOriginalIndex(selectedIndex + selectedText.length);
+                      
+                      // בדוק שהתוצאה תקנית
+                      if (originalStart >= 0 && originalEnd <= originalText.length && originalStart <= originalEnd) {
+                        // עדכן את הבחירה בעורך הטקסט בלי לקחת פוקוס
+                        _textController.selection = TextSelection(
+                          baseOffset: originalStart,
+                          extentOffset: originalEnd,
+                        );
+                      }
+                    }
+                  }
+                },
+                child: _previewRenderer.renderPreview(
+                  markdown: _previewContent,
+                  textStyle: const TextStyle(
+                    fontSize: 16,
+                    fontFamily: 'TaameyAshkenaz',
+                  ),
+                  fontFamily: 'TaameyAshkenaz',
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 
-  /// מצב טקסט גולמי - רק עורך
+  /// מצב טקסט גולמי - כותרות + עורך
   Widget _buildRawView(ThemeData theme) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      child: TextField(
-        scrollController: _editorScrollController,
-        controller: _textController,
-        focusNode: _editorFocusNode,
-        maxLines: null,
-        expands: true,
-        textDirection: TextDirection.rtl,
-        textAlign: TextAlign.right,
-        textAlignVertical: TextAlignVertical.top,
-        style: const TextStyle(
-          fontSize: 16,
-          fontFamily: 'TaameyAshkenaz',
-          height: 1.5,
+    return Row(
+      children: [
+        // סרגל הכותרות
+        Container(
+          width: 200,
+          decoration: BoxDecoration(
+            border: Border(right: BorderSide(color: theme.dividerColor)),
+          ),
+          child: EditorHeadersBar(
+            content: _textController.text,
+            editorScrollController: _editorScrollController,
+            textController: _textController,
+            onHeaderTap: _navigateToHeader,
+          ),
         ),
-        decoration: const InputDecoration(
-          border: InputBorder.none,
-          hintText: 'התחל לכתוב כאן...',
-          hintTextDirection: TextDirection.rtl,
+        // עורך הטקסט
+        Expanded(
+          child: Container(
+            padding: const EdgeInsets.all(16),
+            child: TextField(
+              scrollController: _editorScrollController,
+              controller: _textController,
+              focusNode: _editorFocusNode,
+              maxLines: null,
+              expands: true,
+              textDirection: TextDirection.rtl,
+              textAlign: TextAlign.right,
+              textAlignVertical: TextAlignVertical.top,
+              style: const TextStyle(
+                fontSize: 16,
+                fontFamily: 'TaameyAshkenaz',
+                height: 1.5,
+              ),
+              decoration: const InputDecoration(
+                border: InputBorder.none,
+                hintText: 'התחל לכתוב כאן...',
+                hintTextDirection: TextDirection.rtl,
+              ),
+              onChanged: (text) {
+                // הפונקציה _onTextChanged תטפל בעדכון
+              },
+            ),
+          ),
         ),
-        onChanged: (text) {
-          // הפונקציה _onTextChanged תטפל בעדכון
-        },
-      ),
+      ],
     );
   }
 
-  /// מצב משולב - עורך + תצוגה מקדימה
+  /// מצב משולב - כותרות + עורך + תצוגה מקדימה
   Widget _buildSplitView(ThemeData theme) {
     return Row(
       children: [
-        // חלונית העריכה (ימין)
+        // סרגל הכותרות
+        Container(
+          width: 200,
+          decoration: BoxDecoration(
+            border: Border(right: BorderSide(color: theme.dividerColor)),
+          ),
+          child: EditorHeadersBar(
+            content: _textController.text,
+            editorScrollController: _editorScrollController,
+            textController: _textController,
+            onHeaderTap: _navigateToHeader,
+          ),
+        ),
+        // חלונית העריכה (אמצע)
         Expanded(
           flex: 1,
           child: Container(
             decoration: BoxDecoration(
-              border: Border(left: BorderSide(color: theme.dividerColor)),
+              border: Border(right: BorderSide(color: theme.dividerColor)),
             ),
             padding: const EdgeInsets.all(16),
             child: TextField(
