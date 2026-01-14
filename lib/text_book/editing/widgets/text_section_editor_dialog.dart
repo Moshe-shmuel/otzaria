@@ -955,15 +955,16 @@ class _TextSectionEditorDialogState extends State<TextSectionEditorDialog> {
                 
                 // בדוק שהתוצאה תקנית
                 if (originalStart >= 0 && originalEnd <= originalText.length && originalStart <= originalEnd) {
+                  // עדכן את הבחירה בעורך הטקסט בלי לקחת פוקוס
                   _textController.selection = TextSelection(
                     baseOffset: originalStart,
                     extentOffset: originalEnd,
                   );
                   
-                  // בקש focus על העורך
-                  Future.delayed(const Duration(milliseconds: 50), () {
-                    _editorFocusNode.requestFocus();
-                  });
+                  // אל תקח פוקוס - תן למשתמש להמשיך לבחור בתצוגה המקדימה
+                  // Future.delayed(const Duration(milliseconds: 50), () {
+                  //   _editorFocusNode.requestFocus();
+                  // });
                 }
               }
             }
