@@ -694,17 +694,23 @@ class _TextSectionEditorDialogState extends State<TextSectionEditorDialog> {
     return text.replaceAll(RegExp(r'<[^>]*>'), '');
   }
 
-  /// בנה מפה של plaintext index → original index לביצועים O(1)
+  /// בנה מפה של plaintext index → original index לביצועים O(n)
   void _buildPlainTextMap(String originalText) {
     _plainToOriginalMap.clear();
     int originalIndex = 0;
+    final textLength = originalText.length;
     
-    while (originalIndex < originalText.length) {
+    while (originalIndex < textLength) {
       // דלג על tags - חפש < ואז >
       if (originalText[originalIndex] == '<') {
-        // מצא את סוף ה-tag
-        int tagEnd = originalText.indexOf('>', originalIndex);
-        if (tagEnd != -1) {
+        // חיפוש אופטימלי של > בלבד - O(1) בממוצע
+        int tagEnd = originalIndex + 1;
+        while (tagEnd < textLength && originalText[tagEnd] != '>') {
+          tagEnd++;
+        }
+        
+        if (tagEnd < textLength) {
+          // מצאנו את סוף ה-tag
           originalIndex = tagEnd + 1;
         } else {
           // אם אין > - זה tag לא תקני, דלג רק על <
@@ -875,7 +881,7 @@ class _TextSectionEditorDialogState extends State<TextSectionEditorDialog> {
                           16), // הוספת padding גם כאן ליישור
                       child: SelectionArea(
                         onSelectionChanged: (TextSelection? selection) {
-                          if (selection != null && selection.hasLength) {
+                          if (selection != null && selection.isValid && selection.start != selection.end) {
                             // בדוק שה-selection לא חורג מגדולת ה-plaintext
                             if (selection.start < 0 || selection.end > _plainTextContent.length) {
                               return; // בטל בחירה לא תקנית
