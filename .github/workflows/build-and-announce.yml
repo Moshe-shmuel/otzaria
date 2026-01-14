@@ -5,10 +5,7 @@ permissions:
 
 on:
   push:
-    branches:
-      - main
-      - dev
-
+    # כל ענף - ללא הגבלה
   pull_request:
     types: [opened, synchronize, reopened]
   workflow_dispatch:
@@ -330,10 +327,11 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # --- הכרזה על גרסה שפורסמה ---
+  # --- הכרזה על כל ריצה חדשה ---
   announce_release:
-    # תנאי לריצה רק כשיש אירוע של פרסום release
-    if: github.event_name == 'release'
+    # תנאי לריצה עם כל push או release
+    if: github.event_name == 'release' || github.event_name == 'push'
+    needs: [create_release]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout (full history + tags)
@@ -355,20 +353,27 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          CURRENT_TAG="${{ github.event.release.tag_name }}"
+          
+          # אם זה אירוע release, השתמש בתג מהאירוע
+          if [ "${{ github.event_name }}" = "release" ]; then
+            CURRENT_TAG="${{ github.event.release.tag_name }}"
+          else
+            # אם זה push, השתמש בגרסה מpubspec.yaml
+            CURRENT_TAG=$(grep '^version:' pubspec.yaml | cut -d ' ' -f 2 | cut -d '+' -f 1)
+          fi
+          
           git fetch --tags --force
           
           # מצא את התג הקודם (הכי עדכני שהוא לא התג הנוכחי)
           PREV_TAG=$(git for-each-ref --sort=-creatordate --format '%(refname:strip=2)' refs/tags | grep -v "^$CURRENT_TAG$" | head -n1 || true)
 
           if [ -n "$PREV_TAG" ]; then
-            RANGE="$PREV_TAG..$CURRENT_TAG"
+            RANGE="$PREV_TAG..HEAD"
             # צור רשימה של כותרות הcommits בטווח
             COMMITS=$(git log --pretty=format:'- %s' "$RANGE" || true)
           else
-            # אם אין תג קודם, קח רק את הcommit של התג הנוכחי
-            SHA=$(git rev-list -n 1 "$CURRENT_TAG")
-            COMMITS=$(git log --pretty=format:'- %s' "${SHA}^..${SHA}" || true)
+            # אם אין תג קודם, קח את הcommit האחרון
+            COMMITS=$(git log --pretty=format:'- %s' -1 || true)
           fi
 
           if [ -z "${COMMITS// /}" ]; then
@@ -377,6 +382,7 @@ jobs:
 
           # העבר את רשימת הcommits והתג הקודם לשלבים הבאים
           {
+            echo "current_tag=${CURRENT_TAG}"
             echo "prev_tag=${PREV_TAG}"
             echo "commits<<EOF"
             echo "$COMMITS"
@@ -385,15 +391,15 @@ jobs:
 
       - name: Run announcement script (Mitmachim + Yemot)
         env:
-          # פרטי ה-Release נלקחים מאירוע ה-Webhook של GitHub
-          RELEASE_TAG:  ${{ github.event.release.tag_name }}
-          RELEASE_NAME: ${{ github.event.release.name }}
-          RELEASE_URL:  ${{ github.event.release.html_url }}
+          # פרטי ה-Release - מותאמים לסוג האירוע
+          RELEASE_TAG:  ${{ github.event_name == 'release' && github.event.release.tag_name || steps.changelog.outputs.current_tag }}
+          RELEASE_NAME: ${{ github.event_name == 'release' && github.event.release.name || format('Otzaria {0} (Windows Only)', steps.changelog.outputs.current_tag) }}
+          RELEASE_URL:  ${{ github.event_name == 'release' && github.event.release.html_url || format('https://github.com/{0}/releases/tag/{1}', github.repository, steps.changelog.outputs.current_tag) }}
           GITHUB_EVENT_PATH: ${{ github.event_path }} # חיוני כדי שהסקריפט ימצא את קבצי ההורדה
 
           # הרכבת גוף ההודעה: התיאור מה-Release + רשימת הקומיטים שיצרנו
           RELEASE_BODY: |
-            ${{ github.event.release.body }}
+            ${{ github.event_name == 'release' && github.event.release.body || format('## שינויים בגרסה זו (Windows בלבד)\nנבנה מcommit: {0}\nענף: {1}\n\n**הערה: גרסה זו כוללת רק קבצי Windows**', github.sha, github.ref_name) }}
 
             השינויים מאז הגרסה הקודמת${{ steps.changelog.outputs.prev_tag && format(' ({0})', steps.changelog.outputs.prev_tag) || '' }}:
             ${{ steps.changelog.outputs.commits }}
