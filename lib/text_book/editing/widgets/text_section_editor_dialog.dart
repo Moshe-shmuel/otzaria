@@ -287,30 +287,87 @@ class _TextSectionEditorDialogState extends State<TextSectionEditorDialog> {
     final currentText = _textController.text;
     final selectedText = selection.textInside(currentText);
 
-    // Check if text is already wrapped with this format
-    bool isAlreadyWrapped = selectedText.startsWith(prefix) && 
-                           selectedText.endsWith(suffix);
+    // Check if immediately wrapped with tags (tags right before and after selection)
+    final hasImmediatePrefix = selection.start >= prefix.length && 
+        currentText.substring(selection.start - prefix.length, selection.start) == prefix;
+    final hasImmediateSuffix = selection.end + suffix.length <= currentText.length &&
+        currentText.substring(selection.end, selection.end + suffix.length) == suffix;
+
+    // Check if selection is inside a wrapped block (for partial selections like selecting "hello" in "<b>hello world</b>")
+    bool isInsideWrappedBlock = false;
+    int blockStartIndex = -1;
+    int blockEndIndex = -1;
+
+    if (!hasImmediatePrefix && !hasImmediateSuffix) {
+      // Look backwards for opening tag
+      for (int i = selection.start - 1; i >= 0; i--) {
+        if (i + prefix.length <= currentText.length &&
+            currentText.substring(i, i + prefix.length) == prefix) {
+          // Check if this opening tag is still valid (not closed before selection)
+          String textBetween = currentText.substring(i + prefix.length, selection.start);
+          if (!textBetween.contains(suffix)) {
+            blockStartIndex = i;
+            break;
+          }
+        }
+      }
+
+      // Look forwards for closing tag if we found an opening tag
+      if (blockStartIndex != -1) {
+        for (int i = selection.end; i + suffix.length <= currentText.length; i++) {
+          if (currentText.substring(i, i + suffix.length) == suffix) {
+            // Check if this closing tag matches (no new opening between selection and this closing)
+            String textBetween = currentText.substring(selection.end, i);
+            if (!textBetween.contains(prefix)) {
+              blockEndIndex = i;
+              isInsideWrappedBlock = true;
+              break;
+            }
+          }
+        }
+      }
+    }
 
     String newText;
     TextSelection newSelection;
 
-    if (isAlreadyWrapped) {
-      // Remove the formatting
-      final unwrappedText = selectedText.substring(
-        prefix.length,
-        selectedText.length - suffix.length,
-      );
+    if (hasImmediatePrefix && hasImmediateSuffix) {
+      // Remove formatting - tags are immediately adjacent to selection
+      final start = selection.start - prefix.length;
+      final end = selection.end + suffix.length;
+      newText = currentText.replaceRange(start, end, selectedText);
       
-      newText = currentText.replaceRange(
-        selection.start,
-        selection.end,
-        unwrappedText,
-      );
-
       newSelection = TextSelection(
-        baseOffset: selection.start,
-        extentOffset: selection.start + unwrappedText.length,
+        baseOffset: start,
+        extentOffset: start + selectedText.length,
       );
+    } else if (isInsideWrappedBlock) {
+      // Add closing tag at start of selection and opening tag at end
+      // This removes formatting from the selected portion only
+      newText = currentText;
+      
+      // Insert closing tag at start of selection
+      newText = newText.replaceRange(selection.start, selection.start, suffix);
+      
+      // Insert opening tag at end of selection (accounting for inserted suffix)
+      newText = newText.replaceRange(selection.end + suffix.length, selection.end + suffix.length, prefix);
+      
+      // Check if empty tags were created (e.g., <b></b>) and remove them
+      final emptyTag = suffix + prefix;
+      if (newText.contains(emptyTag)) {
+        newText = newText.replaceAll(emptyTag, '');
+        // After removing empty tags, selection stays on original text
+        newSelection = TextSelection(
+          baseOffset: selection.start,
+          extentOffset: selection.end,
+        );
+      } else {
+        // Empty tags weren't created, keep selection adjusted for new tags
+        newSelection = TextSelection(
+          baseOffset: selection.start + suffix.length,
+          extentOffset: selection.end + suffix.length,
+        );
+      }
     } else {
       // Apply the formatting
       newText = currentText.replaceRange(
