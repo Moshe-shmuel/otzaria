@@ -322,8 +322,9 @@ class _TextSectionEditorDialogState extends State<TextSectionEditorDialog> {
       _hasUnsavedChanges = true;
       _previewContent = newText;
     });
-  }  void _wrap
-Selection(String prefix, String suffix) {
+  }
+
+  void _wrapSelection(String prefix, String suffix) {
     final selection = _textController.selection;
     final currentText = _textController.text;
     final selectedText = selection.textInside(currentText);
