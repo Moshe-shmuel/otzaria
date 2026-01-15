@@ -134,10 +134,16 @@ class _EditorHeadersBarState extends State<EditorHeadersBar> {
           .trim();
       
       if (text.isNotEmpty) {
+        // Find the exact position where the header content starts
+        final fullMatch = match.group(0)!; // Full match including tags
+        final openingTag = RegExp(r'<h[1-6][^>]*>').firstMatch(fullMatch);
+        final contentStartInMatch = openingTag?.end ?? 0;
+        final absoluteContentStart = match.start + contentStartInMatch;
+        
         flatHeaders.add(HeaderEntry(
           text: text,
           level: level,
-          position: match.start,
+          position: absoluteContentStart, // Position where content actually starts
         ));
       }
     }
@@ -205,9 +211,9 @@ class _EditorHeadersBarState extends State<EditorHeadersBar> {
               setState(() {
                 _expanded[index] = !isExpanded;
               });
-            } else {
-              widget.onHeaderTap(header.position);
             }
+            // Always allow navigation to header, even if it has children
+            widget.onHeaderTap(header.position);
           },
           child: Container(
             padding: EdgeInsets.only(
@@ -218,7 +224,7 @@ class _EditorHeadersBarState extends State<EditorHeadersBar> {
             ),
             decoration: BoxDecoration(
               color: isActive
-                  ? Theme.of(context).colorScheme.primaryContainer.withValues(alpha: 0.3)
+                  ? Theme.of(context).colorScheme.primaryContainer.withOpacity(0.3)
                   : null,
               border: Border(
                 bottom: BorderSide(

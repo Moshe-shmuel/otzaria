@@ -322,9 +322,8 @@ class _TextSectionEditorDialogState extends State<TextSectionEditorDialog> {
       _hasUnsavedChanges = true;
       _previewContent = newText;
     });
-  }
-
-  void _wrapSelection(String prefix, String suffix) {
+  }  void _wrap
+Selection(String prefix, String suffix) {
     final selection = _textController.selection;
     final currentText = _textController.text;
     final selectedText = selection.textInside(currentText);
@@ -867,100 +866,56 @@ class _TextSectionEditorDialogState extends State<TextSectionEditorDialog> {
             ),
           ],
         ),
-        body: Column(
+        body: Row(
           children: [
-            // שורת הכותרות העליונה
-            Row(
-              children: [
-                // עמודת הכותרות
-                Container(
-                  width: 200,
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: theme.colorScheme.surfaceContainerHighest,
-                    border: Border(
-                      bottom: BorderSide(color: theme.dividerColor),
-                      right: BorderSide(color: theme.dividerColor),
+            // סרגל הכותרות - צד שמאל של כל המסך
+            Container(
+              width: 200,
+              decoration: BoxDecoration(
+                border: Border(right: BorderSide(color: theme.dividerColor)),
+              ),
+              child: Column(
+                children: [
+                  // רשימת הכותרות
+                  Expanded(
+                    child: EditorHeadersBar(
+                      content: _textController.text,
+                      editorScrollController: _editorScrollController,
+                      textController: _textController,
+                      onHeaderTap: _navigateToHeader,
                     ),
                   ),
-                  child: const Text(
-                    'כותרות',
-                    style: TextStyle(fontWeight: FontWeight.bold),
-                    textAlign: TextAlign.center,
-                  ),
-                ),
-                // עמודת העריכה
-                Expanded(
-                  child: Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: theme.colorScheme.surfaceContainerHighest,
-                      border: Border(
-                        bottom: BorderSide(color: theme.dividerColor),
-                        right: BorderSide(color: theme.dividerColor),
-                      ),
-                    ),
-                    child: const Text(
-                      'עריכה',
-                      style: TextStyle(fontWeight: FontWeight.bold),
-                      textAlign: TextAlign.center,
-                    ),
-                  ),
-                ),
-                // לחצן החלפת מצבי תצוגה
-                Container(
-                  decoration: BoxDecoration(
-                    color: theme.colorScheme.surfaceContainerHighest,
-                    border: Border(
-                      bottom: BorderSide(color: theme.dividerColor),
-                    ),
-                  ),
-                  child: IconButton(
-                    onPressed: _switchViewMode,
-                    icon: Icon(_getViewModeIcon()),
-                    tooltip: _getViewModeTitle(),
-                  ),
-                ),
-                // עמודת התצוגה
-                Expanded(
-                  child: Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: theme.colorScheme.surfaceContainerHighest,
-                      border: Border(
-                        bottom: BorderSide(color: theme.dividerColor),
-                      ),
-                    ),
-                    child: Text(
-                      _getViewModeTitle(),
-                      style: const TextStyle(fontWeight: FontWeight.bold),
-                      textAlign: TextAlign.center,
-                    ),
-                  ),
-                ),
-              ],
+                ],
+              ),
             ),
-            // שורה 2: סרגל הכלים - משותף לכל הרוחב
-            MarkdownToolbar(
-              onBold: () => _wrapSelection('<b>', '</b>'),
-              onItalic: () => _wrapSelection('<i>', '</i>'),
-              onHeader1: () => _wrapSelection('<h1>', '</h1>'),
-              onHeader2: () => _wrapSelection('<h2>', '</h2>'),
-              onHeader3: () => _wrapSelection('<h3>', '</h3>'),
-              onUnorderedList: () =>
-                  _wrapSelection('<ul>\n<li>', '</li>\n</ul>'),
-              onOrderedList: () => _wrapSelection('<ol>\n<li>', '</li>\n</ol>'),
-              onLink: _showLinkDialog,
-              onCode: () => _wrapSelection('<code>', '</code>'),
-              onQuote: () => _wrapSelection('<blockquote>', '</blockquote>'),
-              onUndo: _undo,
-              onRedo: () {/* TODO: Implement redo */},
-              onSearch: _showSearchDialog,
-              hasLinksFile: widget.hasLinksFile,
-            ),
-            // שורה 3: החלוניות עצמן
+            // שאר התוכן - עריכה ותצוגה
             Expanded(
-              child: _buildViewContent(theme),
+              child: Column(
+                children: [
+                  // סרגל הכלים - משותף לכל הרוחב
+                  MarkdownToolbar(
+                    onBold: () => _wrapSelection('<b>', '</b>'),
+                    onItalic: () => _wrapSelection('<i>', '</i>'),
+                    onHeader1: () => _wrapSelection('<h1>', '</h1>'),
+                    onHeader2: () => _wrapSelection('<h2>', '</h2>'),
+                    onHeader3: () => _wrapSelection('<h3>', '</h3>'),
+                    onUnorderedList: () =>
+                        _wrapSelection('<ul>\n<li>', '</li>\n</ul>'),
+                    onOrderedList: () => _wrapSelection('<ol>\n<li>', '</li>\n</ol>'),
+                    onLink: _showLinkDialog,
+                    onCode: () => _wrapSelection('<code>', '</code>'),
+                    onQuote: () => _wrapSelection('<blockquote>', '</blockquote>'),
+                    onUndo: _undo,
+                    onRedo: () {/* TODO: Implement redo */},
+                    onSearch: _showSearchDialog,
+                    hasLinksFile: widget.hasLinksFile,
+                  ),
+                  // התוכן עצמו (בלי סרגל הכותרות)
+                  Expanded(
+                    child: _buildViewContent(theme),
+                  ),
+                ],
+              ),
             ),
           ],
         ),
@@ -980,156 +935,81 @@ class _TextSectionEditorDialogState extends State<TextSectionEditorDialog> {
     }
   }
 
-  /// מצב תצוגה מעוצבת - כותרות + תצוגה מקדימה
+  /// מצב תצוגה מעוצבת - רק תצוגה מקדימה
   Widget _buildFormattedView(ThemeData theme) {
-    return Row(
-      children: [
-        // סרגל הכותרות
-        Container(
-          width: 200,
-          decoration: BoxDecoration(
-            border: Border(right: BorderSide(color: theme.dividerColor)),
-          ),
-          child: EditorHeadersBar(
-            content: _textController.text,
-            editorScrollController: _previewScrollController,
-            textController: _textController,
-            onHeaderTap: (position) {
-              // בתצוגה מעוצבת, נגלול את התצוגה המקדימה
-              if (_previewScrollController.hasClients) {
-                final textUpToPosition = _textController.text.substring(0, position);
-                final linesUpToPosition = '\n'.allMatches(textUpToPosition).length;
-                const averageLineHeight = 20.0;
-                final estimatedScrollOffset = linesUpToPosition * averageLineHeight;
-                final maxScroll = _previewScrollController.position.maxScrollExtent;
-                final targetOffset = estimatedScrollOffset.clamp(0.0, maxScroll);
+    return Container(
+      padding: const EdgeInsets.all(16),
+      child: SingleChildScrollView(
+        controller: _previewScrollController,
+        child: SelectionArea(
+          onSelectionChanged: (SelectedContent? selectedContent) {
+            if (selectedContent != null && selectedContent.plainText.isNotEmpty) {
+              final selectedText = selectedContent.plainText;
+              final originalText = _textController.text;
+              final plainText = _stripHtmlTags(originalText);
+              final selectedIndex = plainText.indexOf(selectedText);
+              
+              if (selectedIndex != -1) {
+                final originalStart = _convertPlainTextIndexToOriginalIndex(selectedIndex);
+                final originalEnd = _convertPlainTextIndexToOriginalIndex(selectedIndex + selectedText.length);
                 
-                _previewScrollController.animateTo(
-                  targetOffset,
-                  duration: const Duration(milliseconds: 300),
-                  curve: Curves.easeInOut,
-                );
+                if (originalStart >= 0 && originalEnd <= originalText.length && originalStart <= originalEnd) {
+                  _textController.selection = TextSelection(
+                    baseOffset: originalStart,
+                    extentOffset: originalEnd,
+                  );
+                }
               }
-            },
-          ),
-        ),
-        // תצוגה מקדימה
-        Expanded(
-          child: Container(
-            padding: const EdgeInsets.all(16),
-            child: SingleChildScrollView(
-              controller: _previewScrollController,
-              child: SelectionArea(
-                onSelectionChanged: (SelectedContent? selectedContent) {
-                  if (selectedContent != null && selectedContent.plainText.isNotEmpty) {
-                    // קבל את הטקסט הנבחר מהתצוגה המקדימה
-                    final selectedText = selectedContent.plainText;
-                    
-                    // חפש את הטקסט הנבחר בתוכן המקורי
-                    final originalText = _textController.text;
-                    final plainText = _stripHtmlTags(originalText);
-                    final selectedIndex = plainText.indexOf(selectedText);
-                    
-                    if (selectedIndex != -1) {
-                      // המר את המיקום מ-plaintext ל-original text
-                      final originalStart = _convertPlainTextIndexToOriginalIndex(selectedIndex);
-                      final originalEnd = _convertPlainTextIndexToOriginalIndex(selectedIndex + selectedText.length);
-                      
-                      // בדוק שהתוצאה תקנית
-                      if (originalStart >= 0 && originalEnd <= originalText.length && originalStart <= originalEnd) {
-                        // עדכן את הבחירה בעורך הטקסט בלי לקחת פוקוס
-                        _textController.selection = TextSelection(
-                          baseOffset: originalStart,
-                          extentOffset: originalEnd,
-                        );
-                      }
-                    }
-                  }
-                },
-                child: _previewRenderer.renderPreview(
-                  markdown: _previewContent,
-                  textStyle: const TextStyle(
-                    fontSize: 16,
-                    fontFamily: 'TaameyAshkenaz',
-                  ),
-                  fontFamily: 'TaameyAshkenaz',
-                ),
-              ),
+            }
+          },
+          child: _previewRenderer.renderPreview(
+            markdown: _previewContent,
+            textStyle: const TextStyle(
+              fontSize: 16,
+              fontFamily: 'TaameyAshkenaz',
             ),
+            fontFamily: 'TaameyAshkenaz',
           ),
         ),
-      ],
+      ),
     );
   }
 
-  /// מצב טקסט גולמי - כותרות + עורך
+  /// מצב טקסט גולמי - רק עורך
   Widget _buildRawView(ThemeData theme) {
-    return Row(
-      children: [
-        // סרגל הכותרות
-        Container(
-          width: 200,
-          decoration: BoxDecoration(
-            border: Border(right: BorderSide(color: theme.dividerColor)),
-          ),
-          child: EditorHeadersBar(
-            content: _textController.text,
-            editorScrollController: _editorScrollController,
-            textController: _textController,
-            onHeaderTap: _navigateToHeader,
-          ),
+    return Container(
+      padding: const EdgeInsets.all(16),
+      child: TextField(
+        scrollController: _editorScrollController,
+        controller: _textController,
+        focusNode: _editorFocusNode,
+        maxLines: null,
+        expands: true,
+        textDirection: TextDirection.rtl,
+        textAlign: TextAlign.right,
+        textAlignVertical: TextAlignVertical.top,
+        style: const TextStyle(
+          fontSize: 16,
+          fontFamily: 'TaameyAshkenaz',
+          height: 1.5,
         ),
-        // עורך הטקסט
-        Expanded(
-          child: Container(
-            padding: const EdgeInsets.all(16),
-            child: TextField(
-              scrollController: _editorScrollController,
-              controller: _textController,
-              focusNode: _editorFocusNode,
-              maxLines: null,
-              expands: true,
-              textDirection: TextDirection.rtl,
-              textAlign: TextAlign.right,
-              textAlignVertical: TextAlignVertical.top,
-              style: const TextStyle(
-                fontSize: 16,
-                fontFamily: 'TaameyAshkenaz',
-                height: 1.5,
-              ),
-              decoration: const InputDecoration(
-                border: InputBorder.none,
-                hintText: 'התחל לכתוב כאן...',
-                hintTextDirection: TextDirection.rtl,
-              ),
-              onChanged: (text) {
-                // הפונקציה _onTextChanged תטפל בעדכון
-              },
-            ),
-          ),
+        decoration: const InputDecoration(
+          border: InputBorder.none,
+          hintText: 'התחל לכתוב כאן...',
+          hintTextDirection: TextDirection.rtl,
         ),
-      ],
+        onChanged: (text) {
+          // הפונקציה _onTextChanged תטפל בעדכון
+        },
+      ),
     );
   }
 
-  /// מצב משולב - כותרות + עורך + תצוגה מקדימה
+  /// מצב משולב - עורך + תצוגה מקדימה
   Widget _buildSplitView(ThemeData theme) {
     return Row(
       children: [
-        // סרגל הכותרות
-        Container(
-          width: 200,
-          decoration: BoxDecoration(
-            border: Border(right: BorderSide(color: theme.dividerColor)),
-          ),
-          child: EditorHeadersBar(
-            content: _textController.text,
-            editorScrollController: _editorScrollController,
-            textController: _textController,
-            onHeaderTap: _navigateToHeader,
-          ),
-        ),
-        // חלונית העריכה (אמצע)
+        // חלונית העריכה (ימין)
         Expanded(
           flex: 1,
           child: Container(
@@ -1171,27 +1051,21 @@ class _TextSectionEditorDialogState extends State<TextSectionEditorDialog> {
             child: SelectionArea(
               onSelectionChanged: (SelectedContent? selectedContent) {
                 if (selectedContent != null && selectedContent.plainText.isNotEmpty) {
-                  // קבל את הטקסט הנבחר מהתצוגה המקדימה
                   final selectedText = selectedContent.plainText;
-                  
-                  // חפש את הטקסט הנבחר בתוכן המקורי
                   final originalText = _textController.text;
                   final plainText = _stripHtmlTags(originalText);
                   final selectedIndex = plainText.indexOf(selectedText);
                   
                   if (selectedIndex != -1) {
-                    // המר את המיקום מ-plaintext ל-original text
                     final originalStart = _convertPlainTextIndexToOriginalIndex(selectedIndex);
                     final originalEnd = _convertPlainTextIndexToOriginalIndex(selectedIndex + selectedText.length);
                     
-                    // בדוק שהתוצאה תקנית
                     if (originalStart >= 0 && originalEnd <= originalText.length && originalStart <= originalEnd) {
                       _textController.selection = TextSelection(
                         baseOffset: originalStart,
                         extentOffset: originalEnd,
                       );
                       
-                      // בקש focus על העורך
                       Future.delayed(const Duration(milliseconds: 50), () {
                         _editorFocusNode.requestFocus();
                       });
@@ -1226,7 +1100,7 @@ class _SearchDialog extends StatefulWidget {
 }
 
 class _SearchDialogState extends State<_SearchDialog> {
-  final _searchController = TextEditingController();
+  final TextEditingController _searchController = TextEditingController();
 
   @override
   void dispose() {
@@ -1234,47 +1108,37 @@ class _SearchDialogState extends State<_SearchDialog> {
     super.dispose();
   }
 
-  void _performSearch() {
-    final searchText = _searchController.text.trim();
-    if (searchText.isNotEmpty) {
-      widget.onSearch(searchText);
-      // Don't close dialog - allow multiple searches
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
       title: const Text('חיפוש בטקסט'),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          TextField(
-            controller: _searchController,
-            decoration: const InputDecoration(
-              labelText: 'הכנס טקסט לחיפוש',
-              hintText: 'מה לחפש...',
-              prefixIcon: Icon(FluentIcons.search_24_regular),
-            ),
-            textDirection: TextDirection.rtl,
-            autofocus: true,
-            onSubmitted: (_) => _performSearch(),
-          ),
-          const SizedBox(height: 8),
-          const Text(
-            'החיפוש מתחיל מהסמן הנוכחי וממשיך מהתחלה אם לא נמצא',
-            style: TextStyle(fontSize: 12, color: Colors.grey),
-            textDirection: TextDirection.rtl,
-          ),
-        ],
+      content: TextField(
+        controller: _searchController,
+        autofocus: true,
+        decoration: const InputDecoration(
+          hintText: 'הכנס טקסט לחיפוש...',
+          border: OutlineInputBorder(),
+        ),
+        textDirection: TextDirection.rtl,
+        onSubmitted: (value) {
+          if (value.isNotEmpty) {
+            widget.onSearch(value);
+            Navigator.of(context).pop();
+          }
+        },
       ),
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('סגור'),
+          child: const Text('ביטול'),
         ),
-        ElevatedButton(
-          onPressed: _performSearch,
+        TextButton(
+          onPressed: () {
+            if (_searchController.text.isNotEmpty) {
+              widget.onSearch(_searchController.text);
+              Navigator.of(context).pop();
+            }
+          },
           child: const Text('חפש'),
         ),
       ],
@@ -1293,8 +1157,8 @@ class _LinkInsertDialog extends StatefulWidget {
 }
 
 class _LinkInsertDialogState extends State<_LinkInsertDialog> {
-  final _textController = TextEditingController();
-  final _urlController = TextEditingController();
+  final TextEditingController _textController = TextEditingController();
+  final TextEditingController _urlController = TextEditingController();
 
   @override
   void dispose() {
@@ -1307,9 +1171,8 @@ class _LinkInsertDialogState extends State<_LinkInsertDialog> {
   Widget build(BuildContext context) {
     return Actions(
       actions: {
-        ActivateIntent: CallbackAction<ActivateIntent>(
-          onInvoke: (_) {
-            widget.onInsert(_textController.text, _urlController.text);
+        DismissIntent: CallbackAction<DismissIntent>(
+          onInvoke: (DismissIntent intent) {
             Navigator.of(context).pop();
             return null;
           },
