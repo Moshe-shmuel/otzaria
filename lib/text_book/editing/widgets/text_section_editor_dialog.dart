@@ -19,9 +19,9 @@ import 'editor_headers_bar.dart';
 
 // מצבי תצוגה
 enum ViewMode {
-  formatted,    // טקסט מעוצב (תצוגה מקדימה)
-  raw,         // טקסט גולמי (HTML עם tags)
-  split        // מצב משולב (עורך + תצוגה מקדימה)
+  formatted, // טקסט מעוצב (תצוגה מקדימה)
+  raw, // טקסט גולמי (HTML עם tags)
+  split // מצב משולב (עורך + תצוגה מקדימה)
 }
 
 /// Full-screen dialog for editing text sections with split-pane interface
@@ -147,9 +147,10 @@ class _TextSectionEditorDialogState extends State<TextSectionEditorDialog> {
 
   void _syncScrollFromEditor() {
     if (_isSyncingScroll || !mounted) return;
-    
+
     // בדוק שה-controllers מוכנים
-    if (!_editorScrollController.hasClients || !_previewScrollController.hasClients) {
+    if (!_editorScrollController.hasClients ||
+        !_previewScrollController.hasClients) {
       return;
     }
 
@@ -175,9 +176,10 @@ class _TextSectionEditorDialogState extends State<TextSectionEditorDialog> {
 
   void _syncScrollFromPreview() {
     if (_isSyncingScroll || !mounted) return;
-    
+
     // בדוק שה-controllers מוכנים
-    if (!_previewScrollController.hasClients || !_editorScrollController.hasClients) {
+    if (!_previewScrollController.hasClients ||
+        !_editorScrollController.hasClients) {
       return;
     }
 
@@ -316,7 +318,7 @@ class _TextSectionEditorDialogState extends State<TextSectionEditorDialog> {
       offset: selection.start + text.length,
     );
     _isApplyingProgrammaticChange = false;
-    
+
     // Mark as changed and sync preview (like _wrapSelection does)
     setState(() {
       _hasUnsavedChanges = true;
@@ -341,10 +343,14 @@ class _TextSectionEditorDialogState extends State<TextSectionEditorDialog> {
     }
 
     // Check if immediately wrapped with tags (tags right before and after selection)
-    final hasImmediatePrefix = selection.start >= prefix.length && 
-        currentText.substring(selection.start - prefix.length, selection.start) == prefix;
-    final hasImmediateSuffix = selection.end + suffix.length <= currentText.length &&
-        currentText.substring(selection.end, selection.end + suffix.length) == suffix;
+    final hasImmediatePrefix = selection.start >= prefix.length &&
+        currentText.substring(
+                selection.start - prefix.length, selection.start) ==
+            prefix;
+    final hasImmediateSuffix = selection.end + suffix.length <=
+            currentText.length &&
+        currentText.substring(selection.end, selection.end + suffix.length) ==
+            suffix;
 
     String newText;
     TextSelection newSelection;
@@ -354,7 +360,7 @@ class _TextSectionEditorDialogState extends State<TextSectionEditorDialog> {
       final start = selection.start - prefix.length;
       final end = selection.end + suffix.length;
       newText = currentText.replaceRange(start, end, selectedText);
-      
+
       newSelection = TextSelection(
         baseOffset: start,
         extentOffset: start + selectedText.length,
@@ -384,7 +390,8 @@ class _TextSectionEditorDialogState extends State<TextSectionEditorDialog> {
             currentText.substring(i, i + prefix.length) == prefix) {
           // Verify this opening tag is not closed before selection
           // Count all suffix occurrences between tag and selection
-          String textBetween = currentText.substring(i + prefix.length, selection.start);
+          String textBetween =
+              currentText.substring(i + prefix.length, selection.start);
           int suffixCount = 0;
           int idx = 0;
           while ((idx = textBetween.indexOf(suffix, idx)) != -1) {
@@ -401,7 +408,9 @@ class _TextSectionEditorDialogState extends State<TextSectionEditorDialog> {
 
       // Look forwards for closing tag if we found an opening tag
       if (blockStartIndex != -1) {
-        for (int i = selection.end; i + suffix.length <= currentText.length; i++) {
+        for (int i = selection.end;
+            i + suffix.length <= currentText.length;
+            i++) {
           if (currentText.substring(i, i + suffix.length) == suffix) {
             // Verify this closing tag matches (count prefix between selection and this closing)
             String textBetween = currentText.substring(selection.end, i);
@@ -424,20 +433,23 @@ class _TextSectionEditorDialogState extends State<TextSectionEditorDialog> {
       if (isInsideWrappedBlock) {
         // Case 4: Add closing tag at start and opening tag at end (partial unwrap)
         newText = currentText;
-        
+
         // Insert closing tag at start of selection
-        newText = newText.replaceRange(selection.start, selection.start, suffix);
-        
+        newText =
+            newText.replaceRange(selection.start, selection.start, suffix);
+
         // Insert opening tag at end of selection (accounting for inserted suffix)
-        newText = newText.replaceRange(selection.end + suffix.length, selection.end + suffix.length, prefix);
-        
+        newText = newText.replaceRange(selection.end + suffix.length,
+            selection.end + suffix.length, prefix);
+
         // Check if empty tags were created at the insertion point
         final emptyTag = suffix + prefix;
         final emptyTagIndex = newText.indexOf(emptyTag, selection.start);
-        
+
         if (emptyTagIndex != -1 && emptyTagIndex == selection.start) {
           // The empty tag is right where we inserted it, remove it
-          newText = newText.replaceRange(emptyTagIndex, emptyTagIndex + emptyTag.length, '');
+          newText = newText.replaceRange(
+              emptyTagIndex, emptyTagIndex + emptyTag.length, '');
           newSelection = TextSelection(
             baseOffset: selection.start,
             extentOffset: selection.end,
@@ -468,7 +480,7 @@ class _TextSectionEditorDialogState extends State<TextSectionEditorDialog> {
     _textController.text = newText;
     _textController.selection = newSelection;
     _isApplyingProgrammaticChange = false;
-    
+
     // mark as changed and update preview
     setState(() {
       _hasUnsavedChanges = true;
@@ -564,10 +576,10 @@ class _TextSectionEditorDialogState extends State<TextSectionEditorDialog> {
       _isUndoRedoOperation = true;
       _textController.text = _undoStack[_undoIndex];
       _textController.selection = _undoSelectionStack[_undoIndex];
-      
+
       // Cancel any pending debounced preview update to avoid stale content
       _debounceTimer?.cancel();
-      
+
       // Update UI state to reflect undo
       setState(() {
         _previewContent = _undoStack[_undoIndex];
@@ -576,7 +588,7 @@ class _TextSectionEditorDialogState extends State<TextSectionEditorDialog> {
         _lastRenderedContent = _undoStack[_undoIndex];
         _hasUnsavedChanges = _undoStack[_undoIndex] != widget.initialContent;
       });
-      
+
       _isUndoRedoOperation = false;
     }
   }
@@ -721,7 +733,7 @@ class _TextSectionEditorDialogState extends State<TextSectionEditorDialog> {
     _plainToOriginalMap.clear();
     int originalIndex = 0;
     final textLength = originalText.length;
-    
+
     while (originalIndex < textLength) {
       // דלג על tags - חפש < ואז >
       if (originalText[originalIndex] == '<') {
@@ -730,7 +742,7 @@ class _TextSectionEditorDialogState extends State<TextSectionEditorDialog> {
         while (tagEnd < textLength && originalText[tagEnd] != '>') {
           tagEnd++;
         }
-        
+
         if (tagEnd < textLength) {
           // מצאנו את סוף ה-tag
           originalIndex = tagEnd + 1;
@@ -744,7 +756,7 @@ class _TextSectionEditorDialogState extends State<TextSectionEditorDialog> {
         originalIndex++;
       }
     }
-    
+
     // הוסף עמדה סופית לסוף הטקסט
     _plainToOriginalMap.add(originalIndex);
   }
@@ -752,18 +764,19 @@ class _TextSectionEditorDialogState extends State<TextSectionEditorDialog> {
   /// המר עמדות selection מ-plaintext ל-original text בעזרת המפה - O(1)
   int _convertPlainTextIndexToOriginalIndex(int plainIndex) {
     // בדוק אם המפה יצאה מעדכן - אם כן, בנה אותה מיד
-    if (_plainToOriginalMap.isEmpty || _lastRenderedContent != _textController.text) {
+    if (_plainToOriginalMap.isEmpty ||
+        _lastRenderedContent != _textController.text) {
       _buildPlainTextMap(_textController.text);
     }
-    
+
     // בדוק גבולות
     if (plainIndex < 0) return 0;
     if (plainIndex >= _plainToOriginalMap.length) {
-      return _plainToOriginalMap.isNotEmpty 
-        ? _plainToOriginalMap.last 
-        : _previewContent.length;
+      return _plainToOriginalMap.isNotEmpty
+          ? _plainToOriginalMap.last
+          : _previewContent.length;
     }
-    
+
     return _plainToOriginalMap[plainIndex];
   }
 
@@ -808,7 +821,7 @@ class _TextSectionEditorDialogState extends State<TextSectionEditorDialog> {
 
     // הצב את הסמן במיקום הכותרת
     _textController.selection = TextSelection.collapsed(offset: position);
-    
+
     // בקש פוקוס על העורך
     _editorFocusNode.requestFocus();
   }
@@ -902,13 +915,18 @@ class _TextSectionEditorDialogState extends State<TextSectionEditorDialog> {
                     onHeader3: () => _wrapSelection('<h3>', '</h3>'),
                     onUnorderedList: () =>
                         _wrapSelection('<ul>\n<li>', '</li>\n</ul>'),
-                    onOrderedList: () => _wrapSelection('<ol>\n<li>', '</li>\n</ol>'),
+                    onOrderedList: () =>
+                        _wrapSelection('<ol>\n<li>', '</li>\n</ol>'),
                     onLink: _showLinkDialog,
                     onCode: () => _wrapSelection('<code>', '</code>'),
-                    onQuote: () => _wrapSelection('<blockquote>', '</blockquote>'),
+                    onQuote: () =>
+                        _wrapSelection('<blockquote>', '</blockquote>'),
                     onUndo: _undo,
                     onRedo: () {/* TODO: Implement redo */},
                     onSearch: _showSearchDialog,
+                    onViewModeSwitch: _switchViewMode,
+                    viewModeIcon: _getViewModeIcon(),
+                    viewModeTooltip: _getViewModeTitle(),
                     hasLinksFile: widget.hasLinksFile,
                   ),
                   // התוכן עצמו (בלי סרגל הכותרות)
@@ -944,17 +962,22 @@ class _TextSectionEditorDialogState extends State<TextSectionEditorDialog> {
         controller: _previewScrollController,
         child: SelectionArea(
           onSelectionChanged: (SelectedContent? selectedContent) {
-            if (selectedContent != null && selectedContent.plainText.isNotEmpty) {
+            if (selectedContent != null &&
+                selectedContent.plainText.isNotEmpty) {
               final selectedText = selectedContent.plainText;
               final originalText = _textController.text;
               final plainText = _stripHtmlTags(originalText);
               final selectedIndex = plainText.indexOf(selectedText);
-              
+
               if (selectedIndex != -1) {
-                final originalStart = _convertPlainTextIndexToOriginalIndex(selectedIndex);
-                final originalEnd = _convertPlainTextIndexToOriginalIndex(selectedIndex + selectedText.length);
-                
-                if (originalStart >= 0 && originalEnd <= originalText.length && originalStart <= originalEnd) {
+                final originalStart =
+                    _convertPlainTextIndexToOriginalIndex(selectedIndex);
+                final originalEnd = _convertPlainTextIndexToOriginalIndex(
+                    selectedIndex + selectedText.length);
+
+                if (originalStart >= 0 &&
+                    originalEnd <= originalText.length &&
+                    originalStart <= originalEnd) {
                   _textController.selection = TextSelection(
                     baseOffset: originalStart,
                     extentOffset: originalEnd,
@@ -1051,22 +1074,27 @@ class _TextSectionEditorDialogState extends State<TextSectionEditorDialog> {
             padding: const EdgeInsets.all(16),
             child: SelectionArea(
               onSelectionChanged: (SelectedContent? selectedContent) {
-                if (selectedContent != null && selectedContent.plainText.isNotEmpty) {
+                if (selectedContent != null &&
+                    selectedContent.plainText.isNotEmpty) {
                   final selectedText = selectedContent.plainText;
                   final originalText = _textController.text;
                   final plainText = _stripHtmlTags(originalText);
                   final selectedIndex = plainText.indexOf(selectedText);
-                  
+
                   if (selectedIndex != -1) {
-                    final originalStart = _convertPlainTextIndexToOriginalIndex(selectedIndex);
-                    final originalEnd = _convertPlainTextIndexToOriginalIndex(selectedIndex + selectedText.length);
-                    
-                    if (originalStart >= 0 && originalEnd <= originalText.length && originalStart <= originalEnd) {
+                    final originalStart =
+                        _convertPlainTextIndexToOriginalIndex(selectedIndex);
+                    final originalEnd = _convertPlainTextIndexToOriginalIndex(
+                        selectedIndex + selectedText.length);
+
+                    if (originalStart >= 0 &&
+                        originalEnd <= originalText.length &&
+                        originalStart <= originalEnd) {
                       _textController.selection = TextSelection(
                         baseOffset: originalStart,
                         extentOffset: originalEnd,
                       );
-                      
+
                       Future.delayed(const Duration(milliseconds: 50), () {
                         _editorFocusNode.requestFocus();
                       });

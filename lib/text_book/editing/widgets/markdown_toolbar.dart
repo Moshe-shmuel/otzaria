@@ -16,6 +16,9 @@ class MarkdownToolbar extends StatelessWidget {
   final VoidCallback onUndo;
   final VoidCallback onRedo;
   final VoidCallback onSearch;
+  final VoidCallback? onViewModeSwitch;
+  final IconData? viewModeIcon;
+  final String? viewModeTooltip;
   final bool hasLinksFile;
 
   const MarkdownToolbar({
@@ -33,13 +36,16 @@ class MarkdownToolbar extends StatelessWidget {
     required this.onUndo,
     required this.onRedo,
     required this.onSearch,
+    this.onViewModeSwitch,
+    this.viewModeIcon,
+    this.viewModeTooltip,
     this.hasLinksFile = false,
   });
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
@@ -63,50 +69,57 @@ class MarkdownToolbar extends StatelessWidget {
             tooltip: 'נטוי (Ctrl+I)',
             onPressed: onItalic,
           ),
-          
+
           const _ToolbarDivider(),
-          
+
           // Headers
           _ToolbarButton(
             icon: FluentIcons.text_header_1_24_regular,
-            tooltip: hasLinksFile ? 'כותרת 1 - מושבת בספר עם לינקים' : 'כותרת 1',
+            tooltip:
+                hasLinksFile ? 'כותרת 1 - מושבת בספר עם לינקים' : 'כותרת 1',
             onPressed: hasLinksFile ? () {} : onHeader1,
             text: 'H1',
             enabled: !hasLinksFile,
           ),
           _ToolbarButton(
             icon: FluentIcons.text_header_1_24_regular,
-            tooltip: hasLinksFile ? 'כותרת 2 - מושבת בספר עם לינקים' : 'כותרת 2',
+            tooltip:
+                hasLinksFile ? 'כותרת 2 - מושבת בספר עם לינקים' : 'כותרת 2',
             onPressed: hasLinksFile ? () {} : onHeader2,
             text: 'H2',
             enabled: !hasLinksFile,
           ),
           _ToolbarButton(
             icon: FluentIcons.text_header_1_24_regular,
-            tooltip: hasLinksFile ? 'כותרת 3 - מושבת בספר עם לינקים' : 'כותרת 3',
+            tooltip:
+                hasLinksFile ? 'כותרת 3 - מושבת בספר עם לינקים' : 'כותרת 3',
             onPressed: hasLinksFile ? () {} : onHeader3,
             text: 'H3',
             enabled: !hasLinksFile,
           ),
-          
+
           const _ToolbarDivider(),
-          
+
           // Lists
           _ToolbarButton(
             icon: FluentIcons.text_bullet_list_24_regular,
-            tooltip: hasLinksFile ? 'רשימה לא ממוספרת - מושבת בספר עם לינקים' : 'רשימה לא ממוספרת',
+            tooltip: hasLinksFile
+                ? 'רשימה לא ממוספרת - מושבת בספר עם לינקים'
+                : 'רשימה לא ממוספרת',
             onPressed: hasLinksFile ? () {} : onUnorderedList,
             enabled: !hasLinksFile,
           ),
           _ToolbarButton(
             icon: FluentIcons.text_number_list_ltr_24_regular,
-            tooltip: hasLinksFile ? 'רשימה ממוספרת - מושבת בספר עם לינקים' : 'רשימה ממוספרת',
+            tooltip: hasLinksFile
+                ? 'רשימה ממוספרת - מושבת בספר עם לינקים'
+                : 'רשימה ממוספרת',
             onPressed: hasLinksFile ? () {} : onOrderedList,
             enabled: !hasLinksFile,
           ),
-          
+
           const _ToolbarDivider(),
-          
+
           // Links and code
           _ToolbarButton(
             icon: FluentIcons.link_24_regular,
@@ -133,9 +146,18 @@ class MarkdownToolbar extends StatelessWidget {
             tooltip: 'חיפוש (Ctrl+F)',
             onPressed: onSearch,
           ),
-          
+
+          // View mode switch button
+          if (onViewModeSwitch != null) ...[
+            _ToolbarButton(
+              icon: viewModeIcon ?? FluentIcons.split_horizontal_24_regular,
+              tooltip: viewModeTooltip ?? 'החלף מצב תצוגה',
+              onPressed: onViewModeSwitch!,
+            ),
+          ],
+
           const _ToolbarDivider(),
-          
+
           // Undo/Redo
           _ToolbarButton(
             icon: FluentIcons.arrow_undo_24_regular,
@@ -147,7 +169,7 @@ class MarkdownToolbar extends StatelessWidget {
             tooltip: 'חזור (Ctrl+Y)',
             onPressed: onRedo,
           ),
-          
+
           // Warning for books with links
           if (hasLinksFile) ...[
             const _ToolbarDivider(),
@@ -213,7 +235,9 @@ class _ToolbarButton extends StatelessWidget {
           style: TextStyle(
             fontSize: 14,
             fontWeight: FontWeight.bold,
-            color: enabled ? Theme.of(context).textTheme.bodyLarge?.color : Colors.grey,
+            color: enabled
+                ? Theme.of(context).textTheme.bodyLarge?.color
+                : Colors.grey,
           ),
         ),
       );
