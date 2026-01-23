@@ -2,8 +2,8 @@ import 'dart:async';
 import 'dart:isolate';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart'; // הוספת import עבור SelectedContent
-import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/services.dart';
+import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../bloc/text_book_bloc.dart';
@@ -102,6 +102,10 @@ class _TextSectionEditorDialogState extends State<TextSectionEditorDialog> {
   // Static variable to track if notification was shown this session
   static bool _hasShownNotification = false;
 
+  // Cursor position for formatted view
+  bool _showCursor = false;
+  Timer? _cursorTimer;
+
   @override
   void initState() {
     super.initState();
@@ -137,6 +141,7 @@ class _TextSectionEditorDialogState extends State<TextSectionEditorDialog> {
     _debounceTimer?.cancel();
     _mapDebounceTimer?.cancel();
     _scrollSyncTimer?.cancel(); // בטל טיימר סנכרון גלילה
+    _cursorTimer?.cancel(); // בטל טיימר הסמן
     _renderIsolate?.kill();
     _receivePort?.close();
     _editorFocusNode.dispose();
@@ -795,6 +800,37 @@ class _TextSectionEditorDialogState extends State<TextSectionEditorDialog> {
           break;
       }
     });
+
+    // התחל הבהוב סמן במצב תצוגה מעוצבת
+    if (_currentViewMode == ViewMode.formatted) {
+      _startCursorBlinking();
+    } else {
+      _stopCursorBlinking();
+    }
+  }
+
+  /// התחל הבהוב סמן
+  void _startCursorBlinking() {
+    _stopCursorBlinking(); // עצור הבהוב קיים
+    _showCursor = true;
+    _cursorTimer = Timer.periodic(const Duration(milliseconds: 500), (timer) {
+      if (mounted) {
+        setState(() {
+          _showCursor = !_showCursor;
+        });
+      }
+    });
+  }
+
+  /// עצור הבהוב סמן
+  void _stopCursorBlinking() {
+    _cursorTimer?.cancel();
+    _cursorTimer = null;
+    if (mounted) {
+      setState(() {
+        _showCursor = false;
+      });
+    }
   }
 
   /// ניווט לכותרת לפי מיקום בטקסט
@@ -954,45 +990,288 @@ class _TextSectionEditorDialogState extends State<TextSectionEditorDialog> {
     }
   }
 
-  /// מצב תצוגה מעוצבת - רק תצוגה מקדימה
+  /// מצב תצוגה מעוצבת - תצוגה מקדימה עם אפשרות הקלדה
   Widget _buildFormattedView(ThemeData theme) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      child: SingleChildScrollView(
-        controller: _previewScrollController,
-        child: SelectionArea(
-          onSelectionChanged: (SelectedContent? selectedContent) {
-            if (selectedContent != null &&
-                selectedContent.plainText.isNotEmpty) {
-              final selectedText = selectedContent.plainText;
-              final originalText = _textController.text;
-              final plainText = _stripHtmlTags(originalText);
-              final selectedIndex = plainText.indexOf(selectedText);
+    return Focus(
+      focusNode: _editorFocusNode,
+      onKeyEvent: (node, event) {
+        // טיפול בקלט מקלדת במצב תצוגה מעוצבת
+        if (event is KeyDownEvent) {
+          final character = event.character;
+          if (character != null && character.isNotEmpty) {
+            // הוסף את התו למיקום הנוכחי של הסמן
+            final selection = _textController.selection;
+            final currentText = _textController.text;
 
-              if (selectedIndex != -1) {
-                final originalStart =
-                    _convertPlainTextIndexToOriginalIndex(selectedIndex);
-                final originalEnd = _convertPlainTextIndexToOriginalIndex(
-                    selectedIndex + selectedText.length);
+            if (widget.hasLinksFile && character == '\n') {
+              // מנע שבירת שורות בספרים עם קישורים
+              UiSnack.show(
+                  'בספר זה אסור לשנות מבנה שורות כדי לשמור על קישורי פרשנות');
+              return KeyEventResult.handled;
+            }
 
-                if (originalStart >= 0 &&
-                    originalEnd <= originalText.length &&
-                    originalStart <= originalEnd) {
-                  _textController.selection = TextSelection(
-                    baseOffset: originalStart,
-                    extentOffset: originalEnd,
-                  );
+            // שמור snapshot לפני השינוי
+            if (!_isUndoRedoOperation) {
+              _saveToUndoStack(currentText, selection);
+            }
+
+            final newText = currentText.replaceRange(
+              selection.start,
+              selection.end,
+              character,
+            );
+
+            _isApplyingProgrammaticChange = true;
+            _textController.text = newText;
+            _textController.selection = TextSelection.collapsed(
+              offset: selection.start + character.length,
+            );
+            _isApplyingProgrammaticChange = false;
+
+            // עדכן את התצוגה
+            setState(() {
+              _hasUnsavedChanges = true;
+              _previewContent = newText;
+            });
+
+            return KeyEventResult.handled;
+          }
+
+          // טיפול במקשי מיוחדים
+          if (event.logicalKey == LogicalKeyboardKey.backspace) {
+            final selection = _textController.selection;
+            final currentText = _textController.text;
+
+            if (selection.start > 0) {
+              // שמור snapshot לפני השינוי
+              if (!_isUndoRedoOperation) {
+                _saveToUndoStack(currentText, selection);
+              }
+
+              final newText = currentText.replaceRange(
+                selection.start - 1,
+                selection.end,
+                '',
+              );
+
+              _isApplyingProgrammaticChange = true;
+              _textController.text = newText;
+              _textController.selection = TextSelection.collapsed(
+                offset: selection.start - 1,
+              );
+              _isApplyingProgrammaticChange = false;
+
+              // עדכן את התצוגה
+              setState(() {
+                _hasUnsavedChanges = true;
+                _previewContent = newText;
+              });
+            }
+
+            return KeyEventResult.handled;
+          }
+
+          if (event.logicalKey == LogicalKeyboardKey.delete) {
+            final selection = _textController.selection;
+            final currentText = _textController.text;
+
+            if (selection.end < currentText.length) {
+              // שמור snapshot לפני השינוי
+              if (!_isUndoRedoOperation) {
+                _saveToUndoStack(currentText, selection);
+              }
+
+              final newText = currentText.replaceRange(
+                selection.start,
+                selection.end + 1,
+                '',
+              );
+
+              _isApplyingProgrammaticChange = true;
+              _textController.text = newText;
+              _textController.selection = TextSelection.collapsed(
+                offset: selection.start,
+              );
+              _isApplyingProgrammaticChange = false;
+
+              // עדכן את התצוגה
+              setState(() {
+                _hasUnsavedChanges = true;
+                _previewContent = newText;
+              });
+            }
+
+            return KeyEventResult.handled;
+          }
+
+          // טיפול במקשי חצים לניווט
+          if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+            final selection = _textController.selection;
+            if (selection.start > 0) {
+              _textController.selection = TextSelection.collapsed(
+                offset: selection.start - 1,
+              );
+            }
+            return KeyEventResult.handled;
+          }
+
+          if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
+            final selection = _textController.selection;
+            if (selection.end < _textController.text.length) {
+              _textController.selection = TextSelection.collapsed(
+                offset: selection.end + 1,
+              );
+            }
+            return KeyEventResult.handled;
+          }
+
+          if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+            final selection = _textController.selection;
+            final currentText = _textController.text;
+            final currentLine =
+                currentText.substring(0, selection.start).split('\n').length -
+                    1;
+
+            if (currentLine > 0) {
+              final lines = currentText.split('\n');
+              final currentLineStart =
+                  currentText.substring(0, selection.start).lastIndexOf('\n') +
+                      1;
+              final currentColumn = selection.start - currentLineStart;
+
+              final prevLineStart = currentText
+                      .substring(0, currentLineStart - 1)
+                      .lastIndexOf('\n') +
+                  1;
+              final prevLineLength = lines[currentLine - 1].length;
+              final newOffset = prevLineStart +
+                  (currentColumn < prevLineLength
+                      ? currentColumn
+                      : prevLineLength);
+
+              _textController.selection =
+                  TextSelection.collapsed(offset: newOffset);
+            }
+            return KeyEventResult.handled;
+          }
+
+          if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+            final selection = _textController.selection;
+            final currentText = _textController.text;
+            final lines = currentText.split('\n');
+            final currentLine =
+                currentText.substring(0, selection.start).split('\n').length -
+                    1;
+
+            if (currentLine < lines.length - 1) {
+              final currentLineStart =
+                  currentText.substring(0, selection.start).lastIndexOf('\n') +
+                      1;
+              final currentColumn = selection.start - currentLineStart;
+
+              final nextLineStart =
+                  currentText.indexOf('\n', selection.start) + 1;
+              final nextLineLength = lines[currentLine + 1].length;
+              final newOffset = nextLineStart +
+                  (currentColumn < nextLineLength
+                      ? currentColumn
+                      : nextLineLength);
+
+              _textController.selection =
+                  TextSelection.collapsed(offset: newOffset);
+            }
+            return KeyEventResult.handled;
+          }
+        }
+
+        return KeyEventResult.ignored;
+      },
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        child: SingleChildScrollView(
+          controller: _previewScrollController,
+          child: SelectionArea(
+            onSelectionChanged: (SelectedContent? selectedContent) {
+              if (selectedContent != null &&
+                  selectedContent.plainText.isNotEmpty) {
+                final selectedText = selectedContent.plainText;
+                final originalText = _textController.text;
+                final plainText = _stripHtmlTags(originalText);
+                final selectedIndex = plainText.indexOf(selectedText);
+
+                if (selectedIndex != -1) {
+                  final originalStart =
+                      _convertPlainTextIndexToOriginalIndex(selectedIndex);
+                  final originalEnd = _convertPlainTextIndexToOriginalIndex(
+                      selectedIndex + selectedText.length);
+
+                  if (originalStart >= 0 &&
+                      originalEnd <= originalText.length &&
+                      originalStart <= originalEnd) {
+                    _textController.selection = TextSelection(
+                      baseOffset: originalStart,
+                      extentOffset: originalEnd,
+                    );
+                  }
                 }
               }
-            }
-          },
-          child: _previewRenderer.renderPreview(
-            markdown: _previewContent,
-            textStyle: const TextStyle(
-              fontSize: 16,
-              fontFamily: 'TaameyAshkenaz',
+            },
+            child: GestureDetector(
+              onTap: () {
+                // בקש פוקוס כשלוחצים על התצוגה המעוצבת
+                _editorFocusNode.requestFocus();
+                _startCursorBlinking();
+              },
+              child: Stack(
+                children: [
+                  _previewRenderer.renderPreview(
+                    markdown: _previewContent,
+                    textStyle: const TextStyle(
+                      fontSize: 16,
+                      fontFamily: 'TaameyAshkenaz',
+                    ),
+                    fontFamily: 'TaameyAshkenaz',
+                  ),
+                  // הצגת סמן במצב תצוגה מעוצבת
+                  if (_currentViewMode == ViewMode.formatted && _showCursor)
+                    Positioned(
+                      bottom: 16,
+                      right: 16,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color:
+                              theme.colorScheme.primary.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(4),
+                          border: Border.all(
+                            color: theme.colorScheme.primary
+                                .withValues(alpha: 0.3),
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              FluentIcons.edit_24_regular,
+                              size: 16,
+                              color: theme.colorScheme.primary,
+                            ),
+                            const SizedBox(width: 4),
+                            Text(
+                              'מצב עריכה פעיל',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: theme.colorScheme.primary,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                ],
+              ),
             ),
-            fontFamily: 'TaameyAshkenaz',
           ),
         ),
       ),
