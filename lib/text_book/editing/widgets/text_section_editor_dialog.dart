@@ -32,6 +32,11 @@ enum ViewMode {
 /// - Toolbar positioned on the right side above editor
 /// - HTML tags support (not Markdown)
 /// - Parallel column layout for simultaneous editing and preview
+/// - Improved cursor synchronization between formatted and raw views:
+///   * Cursor is displayed in formatted view at the correct position
+///   * Clicking in formatted view positions cursor accurately
+///   * Text selection in formatted view syncs with raw editor
+///   * Arrow keys work properly in formatted view with cursor blinking
 class TextSectionEditorDialog extends StatefulWidget {
   final String bookId;
   final int sectionIndex;
@@ -68,8 +73,7 @@ class _TextSectionEditorDialogState extends State<TextSectionEditorDialog> {
 
   bool _hasUnsavedChanges = false;
   String _previewContent = '';
-  String _plainTextContent = ''; // גרסה בלי HTML tags לתאום עם Preview
-  List<int> _plainToOriginalMap = []; // מפה לקבלת עמדות בO(1) במקום O(n)
+  final List<int> _plainToOriginalMap = []; // מפה לקבלת עמדות בO(1) במקום O(n)
   final FocusNode _editorFocusNode = FocusNode();
   String? _lastSearchText; // לשמירת טקסט החיפוש האחרון עבור F3
 
@@ -113,7 +117,6 @@ class _TextSectionEditorDialogState extends State<TextSectionEditorDialog> {
     _textController = TextEditingController(text: widget.initialContent);
     _previewRenderer = PreviewRenderer();
     _previewContent = widget.initialContent;
-    _plainTextContent = _stripHtmlTags(widget.initialContent);
     _buildPlainTextMap(widget.initialContent); // בנה את המפה בתחילה
 
     _editorScrollController = ScrollController();
@@ -228,8 +231,7 @@ class _TextSectionEditorDialogState extends State<TextSectionEditorDialog> {
       setState(() {
         _previewContent = content;
         _lastRenderedContent = content;
-        // עדכן גם את plaintext והמפה בעדכון preview
-        _plainTextContent = _stripHtmlTags(content);
+        // עדכן גם את המפה בעדכון preview
         _buildPlainTextMap(content);
         _isRenderingInBackground = false;
       });
@@ -582,7 +584,6 @@ class _TextSectionEditorDialogState extends State<TextSectionEditorDialog> {
       // Update UI state to reflect undo
       setState(() {
         _previewContent = _undoStack[_undoIndex];
-        _plainTextContent = _stripHtmlTags(_undoStack[_undoIndex]);
         _buildPlainTextMap(_undoStack[_undoIndex]); // בנה מפה חדשה אחרי undo
         _lastRenderedContent = _undoStack[_undoIndex];
         _hasUnsavedChanges = _undoStack[_undoIndex] != widget.initialContent;
@@ -600,8 +601,6 @@ class _TextSectionEditorDialogState extends State<TextSectionEditorDialog> {
 
     setState(() {
       _hasUnsavedChanges = _textController.text != widget.initialContent;
-      // עדכן _plainTextContent מיד כדי לשמור סנכרון
-      _plainTextContent = _stripHtmlTags(_textController.text);
     });
 
     // Debounce בנייה של המפה - לא בונים אותה בכל keystroke
@@ -624,6 +623,8 @@ class _TextSectionEditorDialogState extends State<TextSectionEditorDialog> {
   void _onSelectionChanged() {
     // עדכן את הסמן במצב תצוגה מעוצבת כשהמיקום משתנה
     if (_currentViewMode == ViewMode.formatted && mounted) {
+      // התחל הבהוב סמן כשהמיקום משתנה
+      _startCursorBlinking();
       setState(() {
         // פשוט מעדכן את ה-UI כדי שהסמן יעבור למיקום החדש
       });
@@ -807,6 +808,12 @@ class _TextSectionEditorDialogState extends State<TextSectionEditorDialog> {
     // התחל הבהוב סמן במצב תצוגה מעוצבת
     if (_currentViewMode == ViewMode.formatted) {
       _startCursorBlinking();
+      // בקש פוקוס על העורך כדי שהמקלדת תעבוד
+      Future.delayed(const Duration(milliseconds: 100), () {
+        if (mounted) {
+          _editorFocusNode.requestFocus();
+        }
+      });
     } else {
       _stopCursorBlinking();
     }
@@ -842,43 +849,57 @@ class _TextSectionEditorDialogState extends State<TextSectionEditorDialog> {
     _editorFocusNode.requestFocus();
     _startCursorBlinking();
 
-    // הערכה גסה של מיקום הסמן לפי מיקום הלחיצה
-    // זה לא מושלם אבל נותן תוצאה סבירה
-    final textHeight = 20.0; // גובה שורה משוער
-    final textWidth = 10.0; // רוחב תו משוער
+    // מצא את המיקום המתאים בטקסט הגולמי לפי מיקום הלחיצה
+    // נשתמש בטקסט הפשוט (בלי HTML tags) כדי לחשב את המיקום
+    final plainText = _stripHtmlTags(_textController.text);
+    final lines = plainText.split('\n');
 
-    // חישוב שורה משוערת
-    final estimatedLine = (localPosition.dy / textHeight).floor();
+    // פרמטרים מותאמים לפונט העברי
+    const lineHeight = 24.0; // גובה שורה מותאם
+    const charWidth = 12.0; // רוחב תו ממוצע בעברית
+    const padding = 16.0; // padding של הקונטיינר
 
-    // חישוב עמודה משוערת (מימין לשמאל עבור עברית)
-    final estimatedColumn = (localPosition.dx / textWidth).floor();
+    // חישוב שורה
+    final clickY = localPosition.dy - padding;
+    final estimatedLine =
+        (clickY / lineHeight).floor().clamp(0, lines.length - 1);
 
-    // מצא את המיקום המתאים בטקסט
-    final lines = _textController.text.split('\n');
+    // חישוב עמודה (מימין לשמאל עבור עברית)
+    final clickX = localPosition.dx - padding;
+    final lineWidth = lines[estimatedLine].length * charWidth;
+    final estimatedColumn = ((lineWidth - clickX) / charWidth)
+        .round()
+        .clamp(0, lines[estimatedLine].length);
 
-    if (estimatedLine >= 0 && estimatedLine < lines.length) {
-      // חשב את המיקום בתחילת השורה
-      int lineStartOffset = 0;
-      for (int i = 0; i < estimatedLine; i++) {
-        lineStartOffset += lines[i].length + 1; // +1 עבור \n
-      }
-
-      // הוסף את העמודה (מוגבל לאורך השורה)
-      final lineLength = lines[estimatedLine].length;
-      final columnInLine = estimatedColumn.clamp(0, lineLength);
-
-      final targetOffset = lineStartOffset + columnInLine;
-
-      // עדכן את מיקום הסמן
-      _textController.selection = TextSelection.collapsed(
-        offset: targetOffset.clamp(0, _textController.text.length),
-      );
-    } else {
-      // אם הלחיצה מחוץ לטקסט, הצב את הסמן בסוף
-      _textController.selection = TextSelection.collapsed(
-        offset: _textController.text.length,
-      );
+    // חישוב המיקום בטקסט הפשוט
+    int plainTextOffset = 0;
+    for (int i = 0; i < estimatedLine; i++) {
+      plainTextOffset += lines[i].length + 1; // +1 עבור \n
     }
+    plainTextOffset += estimatedColumn;
+
+    // המר למיקום בטקסט המקורי (עם HTML tags)
+    final originalOffset =
+        _convertPlainTextIndexToOriginalIndex(plainTextOffset);
+
+    // עדכן את מיקום הסמן
+    _textController.selection = TextSelection.collapsed(
+      offset: originalOffset.clamp(0, _textController.text.length),
+    );
+  }
+
+  /// המר מיקום בטקסט המקורי למיקום בטקסט הפשוט
+  int _convertOriginalIndexToPlainTextIndex(int originalIndex) {
+    if (originalIndex <= 0) return 0;
+
+    final originalText = _textController.text;
+    if (originalIndex >= originalText.length) {
+      return _stripHtmlTags(originalText).length;
+    }
+
+    // חשב את מיקום הטקסט הפשוט עד לנקודה הזו
+    final textUpToIndex = originalText.substring(0, originalIndex);
+    return _stripHtmlTags(textUpToIndex).length;
   }
 
   /// בנה אינדיקטור סמן במצב תצוגה מעוצבת
@@ -888,26 +909,37 @@ class _TextSectionEditorDialogState extends State<TextSectionEditorDialog> {
       return const SizedBox.shrink();
     }
 
-    // חשב את מיקום הסמן המשוער בתצוגה
+    // המר את מיקום הסמן בטקסט המקורי למיקום בטקסט הפשוט
     final cursorOffset = selection.baseOffset;
-    final textBeforeCursor = _textController.text.substring(0, cursorOffset);
+    final plainTextOffset = _convertOriginalIndexToPlainTextIndex(cursorOffset);
+
+    // חשב את מיקום הסמן בטקסט הפשוט
+    final plainText = _stripHtmlTags(_textController.text);
+    final textBeforeCursor =
+        plainText.substring(0, plainTextOffset.clamp(0, plainText.length));
     final lines = textBeforeCursor.split('\n');
     final currentLine = lines.length - 1;
     final currentColumn = lines.last.length;
 
-    // הערכה של מיקום הסמן בפיקסלים - מותאם לעברית (RTL)
-    const textHeight = 22.0; // גובה שורה מעט יותר גדול
-    const textWidth = 8.0; // רוחב תו מעט יותר קטן
-    final estimatedY = currentLine * textHeight + 18; // +18 עבור padding
+    // פרמטרים מותאמים לפונט העברי
+    const lineHeight = 24.0; // גובה שורה מותאם
+    const charWidth = 12.0; // רוחב תו ממוצע בעברית
+    const padding = 16.0; // padding של הקונטיינר
+
+    // חישוב מיקום הסמן בפיקסלים
+    final estimatedY =
+        currentLine * lineHeight + padding + 2; // +2 עבור התאמה עדינה
 
     // עבור עברית - חישוב מימין לשמאל
-    final maxLineWidth = 600.0; // רוחב מקסימלי משוער
-    final estimatedX =
-        maxLineWidth - (currentColumn * textWidth) + 16; // +16 עבור padding
+    final plainLines = plainText.split('\n');
+    final currentLineText =
+        currentLine < plainLines.length ? plainLines[currentLine] : '';
+    final lineWidth = currentLineText.length * charWidth;
+    final estimatedX = padding + lineWidth - (currentColumn * charWidth);
 
     return Positioned(
       top: estimatedY,
-      right: estimatedX.clamp(16.0, maxLineWidth),
+      right: estimatedX.clamp(padding, double.infinity),
       child: AnimatedOpacity(
         opacity: _showCursor ? 1.0 : 0.0,
         duration: const Duration(milliseconds: 100),
@@ -1211,6 +1243,8 @@ class _TextSectionEditorDialogState extends State<TextSectionEditorDialog> {
               _textController.selection = TextSelection.collapsed(
                 offset: selection.start - 1,
               );
+              // התחל הבהוב סמן כשמזיזים אותו
+              _startCursorBlinking();
             }
             return KeyEventResult.handled;
           }
@@ -1221,6 +1255,8 @@ class _TextSectionEditorDialogState extends State<TextSectionEditorDialog> {
               _textController.selection = TextSelection.collapsed(
                 offset: selection.end + 1,
               );
+              // התחל הבהוב סמן כשמזיזים אותו
+              _startCursorBlinking();
             }
             return KeyEventResult.handled;
           }
@@ -1251,6 +1287,8 @@ class _TextSectionEditorDialogState extends State<TextSectionEditorDialog> {
 
               _textController.selection =
                   TextSelection.collapsed(offset: newOffset);
+              // התחל הבהוב סמן כשמזיזים אותו
+              _startCursorBlinking();
             }
             return KeyEventResult.handled;
           }
@@ -1279,6 +1317,8 @@ class _TextSectionEditorDialogState extends State<TextSectionEditorDialog> {
 
               _textController.selection =
                   TextSelection.collapsed(offset: newOffset);
+              // התחל הבהוב סמן כשמזיזים אותו
+              _startCursorBlinking();
             }
             return KeyEventResult.handled;
           }
@@ -1297,21 +1337,33 @@ class _TextSectionEditorDialogState extends State<TextSectionEditorDialog> {
                 final selectedText = selectedContent.plainText;
                 final originalText = _textController.text;
                 final plainText = _stripHtmlTags(originalText);
+
+                // מצא את הטקסט הנבחר בטקסט הפשוט
                 final selectedIndex = plainText.indexOf(selectedText);
 
                 if (selectedIndex != -1) {
+                  // המר את המיקומים לטקסט המקורי
                   final originalStart =
                       _convertPlainTextIndexToOriginalIndex(selectedIndex);
                   final originalEnd = _convertPlainTextIndexToOriginalIndex(
                       selectedIndex + selectedText.length);
 
+                  // ודא שהמיקומים תקינים
                   if (originalStart >= 0 &&
                       originalEnd <= originalText.length &&
                       originalStart <= originalEnd) {
+                    // עדכן את הבחירה בעורך הטקסט
                     _textController.selection = TextSelection(
                       baseOffset: originalStart,
                       extentOffset: originalEnd,
                     );
+
+                    // בקש פוקוס על העורך כדי שהבחירה תהיה פעילה
+                    Future.delayed(const Duration(milliseconds: 50), () {
+                      if (mounted) {
+                        _editorFocusNode.requestFocus();
+                      }
+                    });
                   }
                 }
               }
