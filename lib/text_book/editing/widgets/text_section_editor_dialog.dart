@@ -129,6 +129,9 @@ class _TextSectionEditorDialogState extends State<TextSectionEditorDialog> {
     // Listen to text changes
     _textController.addListener(_onTextChanged);
 
+    // Listen to selection changes to update cursor position
+    _textController.addListener(_onSelectionChanged);
+
     // Show first-time notification
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _showFirstTimeNotification();
@@ -384,50 +387,41 @@ class _TextSectionEditorDialogState extends State<TextSectionEditorDialog> {
         extentOffset: selection.start + prefix.length + selectedText.length,
       );
     } else {
-      // Case 3: Check if selection is inside a wrapped block
+      // Case 3: Check if selection is inside a wrapped block - improved logic
       bool isInsideWrappedBlock = false;
       int blockStartIndex = -1;
-      int blockEndIndex = -1;
 
-      // Look backwards for opening tag (starting from closest to selection start)
-      for (int i = selection.start - 1; i >= 0; i--) {
-        if (i + prefix.length <= currentText.length &&
-            currentText.substring(i, i + prefix.length) == prefix) {
-          // Verify this opening tag is not closed before selection
-          // Count all suffix occurrences between tag and selection
+      // Look backwards for the CLOSEST opening tag (limit search to reasonable distance)
+      final maxSearchDistance = 1000; // מגביל את החיפוש ל-1000 תווים לאחור
+      final searchStartPos =
+          (selection.start - maxSearchDistance).clamp(0, selection.start);
+
+      for (int i = selection.start - prefix.length; i >= searchStartPos; i--) {
+        if (currentText.substring(i, i + prefix.length) == prefix) {
+          // בדוק שזה באמת התג הקרוב ביותר - אין תג סגירה ביניהם
           String textBetween =
               currentText.substring(i + prefix.length, selection.start);
-          int suffixCount = 0;
-          int idx = 0;
-          while ((idx = textBetween.indexOf(suffix, idx)) != -1) {
-            suffixCount++;
-            idx += suffix.length;
-          }
-          // If odd number of suffixes, this tag is closed before selection
-          if (suffixCount % 2 == 0) {
+
+          // אם אין תג סגירה ביניהם, זה התג הרלוונטי
+          if (!textBetween.contains(suffix)) {
             blockStartIndex = i;
             break;
           }
         }
       }
 
-      // Look forwards for closing tag if we found an opening tag
+      // Look forwards for the CLOSEST closing tag if we found an opening tag
       if (blockStartIndex != -1) {
-        for (int i = selection.end;
-            i + suffix.length <= currentText.length;
-            i++) {
+        final searchEndPos = (selection.end + maxSearchDistance)
+            .clamp(selection.end, currentText.length);
+
+        for (int i = selection.end; i + suffix.length <= searchEndPos; i++) {
           if (currentText.substring(i, i + suffix.length) == suffix) {
-            // Verify this closing tag matches (count prefix between selection and this closing)
+            // בדוק שזה באמת התג הקרוב ביותר - אין תג פתיחה ביניהם
             String textBetween = currentText.substring(selection.end, i);
-            int prefixCount = 0;
-            int idx = 0;
-            while ((idx = textBetween.indexOf(prefix, idx)) != -1) {
-              prefixCount++;
-              idx += prefix.length;
-            }
-            // If even number of prefixes, this closing tag matches our opening tag
-            if (prefixCount % 2 == 0) {
-              blockEndIndex = i;
+
+            // אם אין תג פתיחה ביניהם, זה התג הרלוונטי
+            if (!textBetween.contains(prefix)) {
               isInsideWrappedBlock = true;
               break;
             }
@@ -436,7 +430,7 @@ class _TextSectionEditorDialogState extends State<TextSectionEditorDialog> {
       }
 
       if (isInsideWrappedBlock) {
-        // Case 4: Add closing tag at start and opening tag at end (partial unwrap)
+        // Case 4: Add closing tag at start and opening tag at end to "cut out" the selection from formatting
         newText = currentText;
 
         // Insert closing tag at start of selection
@@ -625,6 +619,15 @@ class _TextSectionEditorDialogState extends State<TextSectionEditorDialog> {
         _renderPreviewInBackground(_textController.text);
       }
     });
+  }
+
+  void _onSelectionChanged() {
+    // עדכן את הסמן במצב תצוגה מעוצבת כשהמיקום משתנה
+    if (_currentViewMode == ViewMode.formatted && mounted) {
+      setState(() {
+        // פשוט מעדכן את ה-UI כדי שהסמן יעבור למיקום החדש
+      });
+    }
   }
 
   void _showLinkDialog() {
@@ -831,6 +834,103 @@ class _TextSectionEditorDialogState extends State<TextSectionEditorDialog> {
         _showCursor = false;
       });
     }
+  }
+
+  /// טיפול בלחיצה בתצוגה המעוצבת - מיקום הסמן לפי מיקום הלחיצה
+  void _handleTapInFormattedView(Offset localPosition) {
+    // בקש פוקוס
+    _editorFocusNode.requestFocus();
+    _startCursorBlinking();
+
+    // הערכה גסה של מיקום הסמן לפי מיקום הלחיצה
+    // זה לא מושלם אבל נותן תוצאה סבירה
+    final textHeight = 20.0; // גובה שורה משוער
+    final textWidth = 10.0; // רוחב תו משוער
+
+    // חישוב שורה משוערת
+    final estimatedLine = (localPosition.dy / textHeight).floor();
+
+    // חישוב עמודה משוערת (מימין לשמאל עבור עברית)
+    final estimatedColumn = (localPosition.dx / textWidth).floor();
+
+    // מצא את המיקום המתאים בטקסט
+    final lines = _textController.text.split('\n');
+
+    if (estimatedLine >= 0 && estimatedLine < lines.length) {
+      // חשב את המיקום בתחילת השורה
+      int lineStartOffset = 0;
+      for (int i = 0; i < estimatedLine; i++) {
+        lineStartOffset += lines[i].length + 1; // +1 עבור \n
+      }
+
+      // הוסף את העמודה (מוגבל לאורך השורה)
+      final lineLength = lines[estimatedLine].length;
+      final columnInLine = estimatedColumn.clamp(0, lineLength);
+
+      final targetOffset = lineStartOffset + columnInLine;
+
+      // עדכן את מיקום הסמן
+      _textController.selection = TextSelection.collapsed(
+        offset: targetOffset.clamp(0, _textController.text.length),
+      );
+    } else {
+      // אם הלחיצה מחוץ לטקסט, הצב את הסמן בסוף
+      _textController.selection = TextSelection.collapsed(
+        offset: _textController.text.length,
+      );
+    }
+  }
+
+  /// בנה אינדיקטור סמן במצב תצוגה מעוצבת
+  Widget _buildCursorIndicator() {
+    final selection = _textController.selection;
+    if (!selection.isValid || !selection.isCollapsed) {
+      return const SizedBox.shrink();
+    }
+
+    // חשב את מיקום הסמן המשוער בתצוגה
+    final cursorOffset = selection.baseOffset;
+    final textBeforeCursor = _textController.text.substring(0, cursorOffset);
+    final lines = textBeforeCursor.split('\n');
+    final currentLine = lines.length - 1;
+    final currentColumn = lines.last.length;
+
+    // הערכה של מיקום הסמן בפיקסלים - מותאם לעברית (RTL)
+    const textHeight = 22.0; // גובה שורה מעט יותר גדול
+    const textWidth = 8.0; // רוחב תו מעט יותר קטן
+    final estimatedY = currentLine * textHeight + 18; // +18 עבור padding
+
+    // עבור עברית - חישוב מימין לשמאל
+    final maxLineWidth = 600.0; // רוחב מקסימלי משוער
+    final estimatedX =
+        maxLineWidth - (currentColumn * textWidth) + 16; // +16 עבור padding
+
+    return Positioned(
+      top: estimatedY,
+      right: estimatedX.clamp(16.0, maxLineWidth),
+      child: AnimatedOpacity(
+        opacity: _showCursor ? 1.0 : 0.0,
+        duration: const Duration(milliseconds: 100),
+        child: Container(
+          width: 2,
+          height: 20,
+          decoration: BoxDecoration(
+            color: Theme.of(context).colorScheme.primary,
+            borderRadius: BorderRadius.circular(1),
+            boxShadow: [
+              BoxShadow(
+                color: Theme.of(context)
+                    .colorScheme
+                    .primary
+                    .withValues(alpha: 0.3),
+                blurRadius: 2,
+                offset: const Offset(0, 1),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   /// ניווט לכותרת לפי מיקום בטקסט
@@ -1222,6 +1322,10 @@ class _TextSectionEditorDialogState extends State<TextSectionEditorDialog> {
                 _editorFocusNode.requestFocus();
                 _startCursorBlinking();
               },
+              onTapDown: (TapDownDetails details) {
+                // מצא את המיקום המתאים בטקסט הגולמי לפי מיקום הלחיצה
+                _handleTapInFormattedView(details.localPosition);
+              },
               child: Stack(
                 children: [
                   _previewRenderer.renderPreview(
@@ -1232,7 +1336,9 @@ class _TextSectionEditorDialogState extends State<TextSectionEditorDialog> {
                     ),
                     fontFamily: 'TaameyAshkenaz',
                   ),
-                  // הצגת סמן במצב תצוגה מעוצבת
+                  // הצגת סמן במיקום הנוכחי במצב תצוגה מעוצבת
+                  if (_currentViewMode == ViewMode.formatted && _showCursor)
+                    _buildCursorIndicator(),
                   if (_currentViewMode == ViewMode.formatted && _showCursor)
                     Positioned(
                       bottom: 16,
