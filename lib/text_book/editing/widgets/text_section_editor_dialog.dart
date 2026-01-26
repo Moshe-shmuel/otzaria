@@ -629,7 +629,7 @@ class _TextSectionEditorDialogState extends State<TextSectionEditorDialog> {
       // התחל הבהוב סמן כשהמיקום משתנה
       _startCursorBlinking();
       setState(() {
-        // פשוט מעדכן את ה-UI כדי שהסמן יעבור למיקום החדש
+        // עדכן את ה-UI כדי שהסמן יעבור למיקום החדש
       });
     }
   }
@@ -856,6 +856,8 @@ class _TextSectionEditorDialogState extends State<TextSectionEditorDialog> {
     final plainText = _stripHtmlTags(_textController.text);
     final lines = plainText.split('\n');
 
+    if (lines.isEmpty) return;
+
     // פרמטרים מותאמים לפונט העברי
     const lineHeight = 24.0; // גובה שורה מותאם
     const charWidth = 12.0; // רוחב תו ממוצע בעברית
@@ -912,14 +914,23 @@ class _TextSectionEditorDialogState extends State<TextSectionEditorDialog> {
       return const SizedBox.shrink();
     }
 
+    // אם אין פוקוס בעורך, אל תציג סמן
+    if (!_editorFocusNode.hasFocus) {
+      return const SizedBox.shrink();
+    }
+
     // המר את מיקום הסמן בטקסט המקורי למיקום בטקסט הפשוט
     final cursorOffset = selection.baseOffset;
     final plainTextOffset = _convertOriginalIndexToPlainTextIndex(cursorOffset);
 
     // חשב את מיקום הסמן בטקסט הפשוט
     final plainText = _stripHtmlTags(_textController.text);
-    final textBeforeCursor =
-        plainText.substring(0, plainTextOffset.clamp(0, plainText.length));
+
+    if (plainTextOffset > plainText.length) {
+      return const SizedBox.shrink();
+    }
+
+    final textBeforeCursor = plainText.substring(0, plainTextOffset);
     final lines = textBeforeCursor.split('\n');
     final currentLine = lines.length - 1;
     final currentColumn = lines.last.length;
@@ -930,8 +941,7 @@ class _TextSectionEditorDialogState extends State<TextSectionEditorDialog> {
     const padding = 16.0; // padding של הקונטיינר
 
     // חישוב מיקום הסמן בפיקסלים
-    final estimatedY =
-        currentLine * lineHeight + padding + 2; // +2 עבור התאמה עדינה
+    final estimatedY = currentLine * lineHeight + padding;
 
     // עבור עברית - חישוב מימין לשמאל
     final plainLines = plainText.split('\n');
@@ -952,16 +962,6 @@ class _TextSectionEditorDialogState extends State<TextSectionEditorDialog> {
           decoration: BoxDecoration(
             color: Theme.of(context).colorScheme.primary,
             borderRadius: BorderRadius.circular(1),
-            boxShadow: [
-              BoxShadow(
-                color: Theme.of(context)
-                    .colorScheme
-                    .primary
-                    .withValues(alpha: 0.3),
-                blurRadius: 2,
-                offset: const Offset(0, 1),
-              ),
-            ],
           ),
         ),
       ),
