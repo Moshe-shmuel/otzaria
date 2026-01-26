@@ -1003,34 +1003,97 @@ class _TextSectionEditorDialogState extends State<TextSectionEditorDialog> {
     }
   }
 
-  /// מצב תצוגה מעוצבת - תצוגה מקדימה עם סמן המראה את המיקום בעורך
+  /// מצב תצוגה מעוצבת - תצוגה מקדימה עם אפשרות לכתוב
   Widget _buildFormattedView(ThemeData theme) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      child: TextField(
-        scrollController: _editorScrollController,
-        controller: _textController,
-        focusNode: _editorFocusNode,
-        maxLines: null,
-        expands: true,
-        textDirection: TextDirection.rtl,
-        textAlign: TextAlign.right,
-        textAlignVertical: TextAlignVertical.top,
-        style: const TextStyle(
-          fontSize: 16,
-          fontFamily: 'TaameyAshkenaz',
-          height: 1.5,
+    return GestureDetector(
+      onTap: () {
+        // בקש פוקוס על העורך כשלוחצים על התצוגה המקדימה
+        _editorFocusNode.requestFocus();
+      },
+      onTapDown: (TapDownDetails details) {
+        // מצא את המיקום המדויק בטקסט המקורי לפי מיקום הלחיצה
+        _handleTapInPreview(details.localPosition);
+      },
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        child: SingleChildScrollView(
+          controller: _previewScrollController,
+          child: _previewRenderer.renderPreview(
+            markdown: _previewContent,
+            textStyle: const TextStyle(
+              fontSize: 16,
+              fontFamily: 'TaameyAshkenaz',
+            ),
+            fontFamily: 'TaameyAshkenaz',
+          ),
         ),
-        decoration: const InputDecoration(
-          border: InputBorder.none,
-          hintText: 'התחל לכתוב כאן...',
-          hintTextDirection: TextDirection.rtl,
-        ),
-        onChanged: (text) {
-          // הפונקציה _onTextChanged תטפל בעדכון
-        },
       ),
     );
+  }
+
+  /// טיפול בלחיצה בתצוגה המקדימה - מצא את המיקום המדויק בטקסט המקורי
+  void _handleTapInPreview(Offset localPosition) {
+    _editorFocusNode.requestFocus();
+
+    // השתמש בטקסט הפשוט (בלי HTML tags) כדי לחשב את המיקום
+    final plainText = _stripHtmlTags(_textController.text);
+    final lines = plainText.split('\n');
+
+    debugPrint('=== DEBUG: _handleTapInPreview ===');
+    debugPrint('plainText length: ${plainText.length}');
+    debugPrint('lines count: ${lines.length}');
+    debugPrint('_plainToOriginalMap length: ${_plainToOriginalMap.length}');
+    debugPrint('localPosition: $localPosition');
+
+    if (lines.isEmpty) {
+      debugPrint('ERROR: lines is empty');
+      return;
+    }
+
+    // פרמטרים מותאמים לפונט העברי
+    const lineHeight = 24.0;
+    const charWidth = 12.0;
+    const padding = 16.0;
+
+    // חישוב שורה
+    final clickY = localPosition.dy - padding;
+    final estimatedLine =
+        (clickY / lineHeight).floor().clamp(0, lines.length - 1);
+
+    // חישוב עמודה (מימין לשמאל עבור עברית)
+    final clickX = localPosition.dx - padding;
+    final lineWidth = lines[estimatedLine].length * charWidth;
+    final estimatedColumn = ((lineWidth - clickX) / charWidth)
+        .round()
+        .clamp(0, lines[estimatedLine].length);
+
+    debugPrint(
+        'estimatedLine: $estimatedLine, estimatedColumn: $estimatedColumn');
+
+    // חישוב המיקום בטקסט הפשוט
+    int plainTextOffset = 0;
+    for (int i = 0; i < estimatedLine; i++) {
+      plainTextOffset += lines[i].length + 1;
+    }
+    plainTextOffset += estimatedColumn;
+
+    debugPrint('plainTextOffset: $plainTextOffset');
+
+    // השתמש במיפוי הקיים כדי להמיר למיקום בטקסט המקורי
+    final originalOffset = plainTextOffset < _plainToOriginalMap.length
+        ? _plainToOriginalMap[plainTextOffset]
+        : _textController.text.length;
+
+    debugPrint('originalOffset: $originalOffset');
+    debugPrint('textController.text length: ${_textController.text.length}');
+
+    // עדכן את מיקום הסמן
+    _textController.selection = TextSelection.collapsed(
+      offset: originalOffset.clamp(0, _textController.text.length),
+    );
+
+    debugPrint('selection updated to: ${_textController.selection.baseOffset}');
+    debugPrint('=== END DEBUG ===');
   }
 
   /// מצב טקסט גולמי - רק עורך
