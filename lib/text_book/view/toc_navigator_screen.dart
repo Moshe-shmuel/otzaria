@@ -177,6 +177,7 @@ class _TocViewerState extends State<TocViewer>
                               index: entry.index,
                               duration: const Duration(milliseconds: 250),
                               curve: Curves.ease,
+                              alignment: 0.5, // מרכז את הפריט בתצוגה
                             );
                             if (Platform.isAndroid) {
                               widget.closeLeftPaneCallback();
@@ -261,6 +262,7 @@ class _TocViewerState extends State<TocViewer>
                   index: entry.index,
                   duration: const Duration(milliseconds: 250),
                   curve: Curves.ease,
+                  alignment: 0.5, // מרכז את הפריט בתצוגה
                 );
                 if (Platform.isAndroid) {
                   widget.closeLeftPaneCallback();
@@ -317,6 +319,7 @@ class _TocViewerState extends State<TocViewer>
         index: entry.index,
         duration: const Duration(milliseconds: 250),
         curve: Curves.ease,
+        alignment: 0.5, // מרכז את הפריט בתצוגה
       );
       if (Platform.isAndroid) {
         widget.closeLeftPaneCallback();
@@ -578,16 +581,21 @@ class _TocViewerState extends State<TocViewer>
                       }
                       return false;
                     },
-                    child: SingleChildScrollView(
+                    child: Scrollbar(
                       controller: _tocScrollController,
-                      child: searchController.text.isEmpty
-                          ? ListView.builder(
-                              shrinkWrap: true,
-                              physics: const NeverScrollableScrollPhysics(),
-                              itemCount: state.tableOfContents.length,
-                              itemBuilder: (context, index) =>
-                                  _buildTocItem(state.tableOfContents[index]))
-                          : _buildFilteredList(state.tableOfContents, context),
+                      thumbVisibility: true,
+                      child: SingleChildScrollView(
+                        controller: _tocScrollController,
+                        child: searchController.text.isEmpty
+                            ? ListView.builder(
+                                shrinkWrap: true,
+                                physics: const NeverScrollableScrollPhysics(),
+                                itemCount: state.tableOfContents.length,
+                                itemBuilder: (context, index) =>
+                                    _buildTocItem(state.tableOfContents[index]))
+                            : _buildFilteredList(
+                                state.tableOfContents, context),
+                      ),
                     ),
                   ),
                 ),
