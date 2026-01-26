@@ -846,128 +846,6 @@ class _TextSectionEditorDialogState extends State<TextSectionEditorDialog> {
     }
   }
 
-  /// טיפול בלחיצה בתצוגה המעוצבת - מיקום הסמן לפי המיפוי הקיים
-  void _handleTapInFormattedView(Offset localPosition) {
-    // בקש פוקוס
-    _editorFocusNode.requestFocus();
-    _startCursorBlinking();
-
-    // השתמש בטקסט הפשוט (בלי HTML tags) כדי לחשב את המיקום
-    final plainText = _stripHtmlTags(_textController.text);
-    final lines = plainText.split('\n');
-
-    if (lines.isEmpty) return;
-
-    // פרמטרים מותאמים לפונט העברי
-    const lineHeight = 24.0; // גובה שורה מותאם
-    const charWidth = 12.0; // רוחב תו ממוצע בעברית
-    const padding = 16.0; // padding של הקונטיינר
-
-    // חישוב שורה
-    final clickY = localPosition.dy - padding;
-    final estimatedLine =
-        (clickY / lineHeight).floor().clamp(0, lines.length - 1);
-
-    // חישוב עמודה (מימין לשמאל עבור עברית)
-    final clickX = localPosition.dx - padding;
-    final lineWidth = lines[estimatedLine].length * charWidth;
-    final estimatedColumn = ((lineWidth - clickX) / charWidth)
-        .round()
-        .clamp(0, lines[estimatedLine].length);
-
-    // חישוב המיקום בטקסט הפשוט
-    int plainTextOffset = 0;
-    for (int i = 0; i < estimatedLine; i++) {
-      plainTextOffset += lines[i].length + 1; // +1 עבור \n
-    }
-    plainTextOffset += estimatedColumn;
-
-    // המר למיקום בטקסט המקורי (עם HTML tags) באמצעות המיפוי הקיים
-    final originalOffset =
-        _convertPlainTextIndexToOriginalIndex(plainTextOffset);
-
-    // עדכן את מיקום הסמן
-    _textController.selection = TextSelection.collapsed(
-      offset: originalOffset.clamp(0, _textController.text.length),
-    );
-  }
-
-  /// המר מיקום בטקסט המקורי למיקום בטקסט הפשוט
-  int _convertOriginalIndexToPlainTextIndex(int originalIndex) {
-    if (originalIndex <= 0) return 0;
-
-    final originalText = _textController.text;
-    if (originalIndex >= originalText.length) {
-      return _stripHtmlTags(originalText).length;
-    }
-
-    // חשב את מיקום הטקסט הפשוט עד לנקודה הזו
-    final textUpToIndex = originalText.substring(0, originalIndex);
-    return _stripHtmlTags(textUpToIndex).length;
-  }
-
-  /// בנה אינדיקטור סמן במצב תצוגה מעוצבת
-  /// משתמש במיפוי הקיים של בחירת טקסט לעיצוב
-  Widget _buildCursorIndicator() {
-    final selection = _textController.selection;
-    if (!selection.isValid || !selection.isCollapsed) {
-      return const SizedBox.shrink();
-    }
-
-    // אם אין פוקוס בעורך, אל תציג סמן
-    if (!_editorFocusNode.hasFocus) {
-      return const SizedBox.shrink();
-    }
-
-    // המר את מיקום הסמן בטקסט המקורי למיקום בטקסט הפשוט
-    final cursorOffset = selection.baseOffset;
-    final plainTextOffset = _convertOriginalIndexToPlainTextIndex(cursorOffset);
-
-    // חשב את מיקום הסמן בטקסט הפשוט
-    final plainText = _stripHtmlTags(_textController.text);
-
-    if (plainTextOffset > plainText.length) {
-      return const SizedBox.shrink();
-    }
-
-    final textBeforeCursor = plainText.substring(0, plainTextOffset);
-    final lines = textBeforeCursor.split('\n');
-    final currentLine = lines.length - 1;
-    final currentColumn = lines.last.length;
-
-    // פרמטרים מותאמים לפונט העברי
-    const lineHeight = 24.0; // גובה שורה מותאם
-    const charWidth = 12.0; // רוחב תו ממוצע בעברית
-    const padding = 16.0; // padding של הקונטיינר
-
-    // חישוב מיקום הסמן בפיקסלים
-    final estimatedY = currentLine * lineHeight + padding;
-
-    // עבור עברית - חישוב מימין לשמאל
-    final plainLines = plainText.split('\n');
-    final currentLineText =
-        currentLine < plainLines.length ? plainLines[currentLine] : '';
-    final lineWidth = currentLineText.length * charWidth;
-    final estimatedX = padding + lineWidth - (currentColumn * charWidth);
-
-    return Positioned(
-      top: estimatedY,
-      right: estimatedX.clamp(padding, double.infinity),
-      child: AnimatedOpacity(
-        opacity: _showCursor ? 1.0 : 0.0,
-        duration: const Duration(milliseconds: 100),
-        child: Container(
-          width: 2,
-          height: 20,
-          decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.primary,
-            borderRadius: BorderRadius.circular(1),
-          ),
-        ),
-      ),
-    );
-  }
-
   /// ניווט לכותרת לפי מיקום בטקסט
   void _navigateToHeader(int position) {
     if (!_editorScrollController.hasClients) return;
@@ -1129,117 +1007,28 @@ class _TextSectionEditorDialogState extends State<TextSectionEditorDialog> {
   Widget _buildFormattedView(ThemeData theme) {
     return Container(
       padding: const EdgeInsets.all(16),
-      child: SingleChildScrollView(
-        controller: _previewScrollController,
-        child: SelectionArea(
-          onSelectionChanged: (SelectedContent? selectedContent) {
-            if (selectedContent != null &&
-                selectedContent.plainText.isNotEmpty) {
-              final selectedText = selectedContent.plainText;
-              final originalText = _textController.text;
-              final plainText = _stripHtmlTags(originalText);
-
-              // מצא את הטקסט הנבחר בטקסט הפשוט
-              final selectedIndex = plainText.indexOf(selectedText);
-
-              if (selectedIndex != -1) {
-                // המר את המיקומים לטקסט המקורי
-                final originalStart =
-                    _convertPlainTextIndexToOriginalIndex(selectedIndex);
-                final originalEnd = _convertPlainTextIndexToOriginalIndex(
-                    selectedIndex + selectedText.length);
-
-                // ודא שהמיקומים תקינים
-                if (originalStart >= 0 &&
-                    originalEnd <= originalText.length &&
-                    originalStart <= originalEnd) {
-                  // עדכן את הבחירה בעורך הטקסט
-                  _textController.selection = TextSelection(
-                    baseOffset: originalStart,
-                    extentOffset: originalEnd,
-                  );
-
-                  // בקש פוקוס על העורך כדי שהבחירה תהיה פעילה
-                  Future.delayed(const Duration(milliseconds: 50), () {
-                    if (mounted) {
-                      _editorFocusNode.requestFocus();
-                    }
-                  });
-                }
-              }
-            }
-          },
-          child: GestureDetector(
-            onTap: () {
-              // בקש פוקוס כשלוחצים על התצוגה המעוצבת
-              _editorFocusNode.requestFocus();
-              _startCursorBlinking();
-            },
-            onTapDown: (TapDownDetails details) {
-              // מצא את המיקום המתאים בטקסט הגולמי לפי מיקום הלחיצה
-              // השתמש במיפוי הקיים של בחירת טקסט
-              _handleTapInFormattedView(details.localPosition);
-
-              // בקש פוקוס על העורך כדי שהקלדה תעבוד
-              Future.delayed(const Duration(milliseconds: 50), () {
-                if (mounted) {
-                  _editorFocusNode.requestFocus();
-                  _startCursorBlinking();
-                }
-              });
-            },
-            child: Stack(
-              children: [
-                _previewRenderer.renderPreview(
-                  markdown: _previewContent,
-                  textStyle: const TextStyle(
-                    fontSize: 16,
-                    fontFamily: 'TaameyAshkenaz',
-                  ),
-                  fontFamily: 'TaameyAshkenaz',
-                ),
-                // הצגת סמן במיקום הנוכחי במצב תצוגה מעוצבת
-                if (_currentViewMode == ViewMode.formatted && _showCursor)
-                  _buildCursorIndicator(),
-                if (_currentViewMode == ViewMode.formatted && _showCursor)
-                  Positioned(
-                    bottom: 16,
-                    right: 16,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: theme.colorScheme.primary.withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(4),
-                        border: Border.all(
-                          color:
-                              theme.colorScheme.primary.withValues(alpha: 0.3),
-                        ),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            FluentIcons.edit_24_regular,
-                            size: 16,
-                            color: theme.colorScheme.primary,
-                          ),
-                          const SizedBox(width: 4),
-                          Text(
-                            'מצב עריכה פעיל',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: theme.colorScheme.primary,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-          ),
+      child: TextField(
+        scrollController: _editorScrollController,
+        controller: _textController,
+        focusNode: _editorFocusNode,
+        maxLines: null,
+        expands: true,
+        textDirection: TextDirection.rtl,
+        textAlign: TextAlign.right,
+        textAlignVertical: TextAlignVertical.top,
+        style: const TextStyle(
+          fontSize: 16,
+          fontFamily: 'TaameyAshkenaz',
+          height: 1.5,
         ),
+        decoration: const InputDecoration(
+          border: InputBorder.none,
+          hintText: 'התחל לכתוב כאן...',
+          hintTextDirection: TextDirection.rtl,
+        ),
+        onChanged: (text) {
+          // הפונקציה _onTextChanged תטפל בעדכון
+        },
       ),
     );
   }
